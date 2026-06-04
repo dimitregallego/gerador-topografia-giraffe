@@ -342,11 +342,12 @@ function detectCotaField(feature) {
   if (customField && p[customField] !== undefined) return `${customField} = ${p[customField]}`;
   // Detecção automática — lista exaustiva de nomes possíveis
   const candidates = [
-    'cota','COTA','cota_z','COTA_Z','cota_mestra','COTA_MESTRA',
-    'cota_intermediaria','COTA_INTERMEDIARIA','cota_curva','COTA_CURVA',
-    'elevacao','ELEVACAO','altitude','ALTITUDE','z','Z','nivel','NIVEL',
-    'elev','ELEV','height','HEIGHT','hgt','HGT','alt','ALT',
-    'dem','DEM','mdt','MDT','cota_val','valor_cota',
+    'cd_numero_isovalor',           // ← CAMPO REAL GeoSampa (SP)
+    'cota','COTA','cota_z','COTA_Z',
+    'cota_mestra','COTA_MESTRA','cota_intermediaria','COTA_INTERMEDIARIA',
+    'elevacao','ELEVACAO','altitude','ALTITUDE',
+    'z','Z','nivel','NIVEL','elev','ELEV',
+    'height','HEIGHT','alt','ALT','dem','DEM','mdt','MDT',
   ];
   for (const k of candidates) {
     if (k in p) {
@@ -360,17 +361,25 @@ function detectCotaField(feature) {
 // Extrai o valor numérico da cota, usando campo customizado se informado
 function extractCota(feature) {
   const p = feature.properties || {};
+
+  // Campo customizado informado pelo usuário (aba Diagnóstico)
   const customField = document.getElementById('cotaField')?.value?.trim();
   if (customField) {
     const v = parseFloat(p[customField]);
     if (!isNaN(v) && v > 0 && v < 5000) return v;
   }
+
+  // cd_numero_isovalor é o campo real do GeoSampa (confirmado via DescribeFeatureType)
+  // Contém o valor da isocota em metros inteiros (ex: 810 = 810m)
   const candidates = [
-    'cota','COTA','cota_z','COTA_Z','cota_mestra','COTA_MESTRA',
-    'cota_intermediaria','COTA_INTERMEDIARIA','cota_curva','COTA_CURVA',
-    'elevacao','ELEVACAO','altitude','ALTITUDE','z','Z','nivel','NIVEL',
-    'elev','ELEV','height','HEIGHT','hgt','HGT','alt','ALT',
-    'dem','DEM','mdt','MDT','cota_val','valor_cota',
+    'cd_numero_isovalor',           // ← CAMPO REAL GeoSampa (SP)
+    'cota','COTA','cota_z','COTA_Z',
+    'cota_mestra','COTA_MESTRA',
+    'cota_intermediaria','COTA_INTERMEDIARIA',
+    'elevacao','ELEVACAO','altitude','ALTITUDE',
+    'z','Z','nivel','NIVEL',
+    'elev','ELEV','height','HEIGHT',
+    'alt','ALT','dem','DEM','mdt','MDT',
   ];
   for (const k of candidates) {
     if (k in p) {
@@ -378,13 +387,9 @@ function extractCota(feature) {
       if (!isNaN(v) && v > 0 && v < 5000) return v;
     }
   }
-  // Último fallback: qualquer número entre 100-1500 nas propriedades (faixa de SP)
+  // Fallback numérico: qualquer inteiro na faixa altimétrica de SP (600-1200m)
   for (const v of Object.values(p)) {
-    if (typeof v === 'number' && v >= 100 && v <= 1500) return v;
-    if (typeof v === 'string') {
-      const m = v.match(/^\s*(\d{3,4}(?:[.,]\d*)?)\s*$/);
-      if (m) { const n = parseFloat(m[1].replace(',','.')); if (n>=100&&n<=1500) return n; }
-    }
+    if (typeof v === 'number' && v >= 600 && v <= 1200) return v;
   }
   return null;
 }
