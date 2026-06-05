@@ -322,199 +322,103 @@ function toLocalMeters(pts, centerLng, centerLat, datum, exagero) {
 // TRIANGULAÇÃO + MESH + GLB EXPORT
 // ═══════════════════════════════════════════════════════════════════════
 function buildAndExportGLB(localPts, stats) {
-  // ── 1. Delaunator — triangula no plano XZ (2D) ──────────────────
+  // ── 1. Delaunator ────────────────────────────────────────────────
   const coords2D = localPts.map(p => [p.x, p.z]);
   const delaunay = Delaunator.from(coords2D);
   const rawTris = delaunay.triangles.length / 3;
-  if (rawTris === 0) throw new Error('0 triângulos — pontos podem ser colineares.');
+  if (rawTris === 0) throw new Error('0 triângulos.');
 
   // ── 2. Filtrar triângulos com arestas muito longas ───────────────
-  // O Delaunator gera triangulação CONVEXA — cria triângulos gigantes
-  // nas bordas da nuvem de pontos. Esses triângulos criam "rampas" 
-  // falsas entre curvas distantes. Removemos triângulos com qualquer
-  // aresta maior que o limiar.
-  
-  // Calcular comprimento de todas as arestas para determinar o limiar
+  // Delaunator gera casco convexo — triângulos gigantes nas bordas.
   const edgeLens = [];
   for (let t = 0; t < rawTris; t++) {
-    const i0 = delaunay.triangles[t*3], i1 = delaunay.triangles[t*3+1], i2 = delaunay.triangles[t*3+2];
-    const p0 = localPts[i0], p1 = localPts[i1], p2 = localPts[i2];
-    edgeLens.push(
-      Math.hypot(p1.x-p0.x, p1.z-p0.z),
-      Math.hypot(p2.x-p1.x, p2.z-p1.z),
-      Math.hypot(p0.x-p2.x, p0.z-p2.z),
-    );
+    const i0=delaunay.triangles[t*3], i1=delaunay.triangles[t*3+1], i2=delaunay.triangles[t*3+2];
+    const a=localPts[i0], b=localPts[i1], c=localPts[i2];
+    edgeLens.push(Math.hypot(b.x-a.x,b.z-a.z), Math.hypot(c.x-b.x,c.z-b.z), Math.hypot(a.x-c.x,a.z-c.z));
   }
   edgeLens.sort((a,b) => a-b);
-  const medianEdge = edgeLens[Math.floor(edgeLens.length * 0.5)];
-  // Limiar = 2.5× a mediana — remove os outliers sem cortar demais
-  const maxEdge = medianEdge * 2.5;
-  log('ok', `Arestas: mediana ${medianEdge.toFixed(1)}m · limiar ${maxEdge.toFixed(1)}m`);
+  const maxEdge = edgeLens[Math.floor(edgeLens.length*0.5)] * 2.5;
 
-  // Filtrar triângulos
-  const goodIdx = []; // índices dos triângulos que passam no filtro
+  // Montar índices filtrados (sem re-indexar — mantém todos os vértices)
+  const filtIdx = [];
   let removed = 0;
   for (let t = 0; t < rawTris; t++) {
-    const i0 = delaunay.triangles[t*3], i1 = delaunay.triangles[t*3+1], i2 = delaunay.triangles[t*3+2];
-    const p0 = localPts[i0], p1 = localPts[i1], p2 = localPts[i2];
-    const e1 = Math.hypot(p1.x-p0.x, p1.z-p0.z);
-    const e2 = Math.hypot(p2.x-p1.x, p2.z-p1.z);
-    const e3 = Math.hypot(p0.x-p2.x, p0.z-p2.z);
-    if (e1 <= maxEdge && e2 <= maxEdge && e3 <= maxEdge) {
-      goodIdx.push(i0, i1, i2);
-    } else {
-      removed++;
-    }
+    const i0=delaunay.triangles[t*3], i1=delaunay.triangles[t*3+1], i2=delaunay.triangles[t*3+2];
+    const a=localPts[i0], b=localPts[i1], c=localPts[i2];
+    if (Math.hypot(b.x-a.x,b.z-a.z)<=maxEdge && Math.hypot(c.x-b.x,c.z-b.z)<=maxEdge && Math.hypot(a.x-c.x,a.z-c.z)<=maxEdge) {
+      filtIdx.push(i0, i1, i2);
+    } else removed++;
   }
-  const finalTris = goodIdx.length / 3;
-  log('ok', `Filtro: ${finalTris} triângulos OK · ${removed} removidos (arestas > ${maxEdge.toFixed(0)}m)`);
-  stats['Triângulos brutos'] = rawTris;
-  stats['Triângulos filtrados'] = finalTris;
-  stats['Removidos (borda)'] = removed;
-  if (finalTris === 0) throw new Error('Todos os triângulos foram filtrados. Tente aumentar o buffer.');
+  const nTris = filtIdx.length / 3;
+  log('ok', `Delaunator: ${rawTris} brutos → ${nTris} filtrados (${removed} removidos)`);
+  stats['Triângulos'] = nTris;
+  if (nTris === 0) throw new Error('Todos removidos. Aumente o buffer.');
 
-  // ── 3. Re-indexar vértices (remover não-usados para arquivo menor) ─
-  const usedSet = new Set(goodIdx);
-  const oldToNew = new Map();
-  const newVerts = [];
-  let newIdx = 0;
-  for (const oldI of usedSet) {
-    oldToNew.set(oldI, newIdx++);
-    newVerts.push(localPts[oldI]);
+  // ── 3. Montar buffers ────────────────────────────────────────────
+  const nV = localPts.length;
+  const vBuf = new Float32Array(nV * 3);
+  let xn=Infinity,xx=-Infinity,yn=Infinity,yx=-Infinity,zn=Infinity,zx=-Infinity;
+  for (let i = 0; i < nV; i++) {
+    const {x,y,z} = localPts[i];
+    vBuf[i*3]=x; vBuf[i*3+1]=y; vBuf[i*3+2]=z;
+    if(x<xn)xn=x;if(x>xx)xx=x;if(y<yn)yn=y;if(y>yx)yx=y;if(z<zn)zn=z;if(z>zx)zx=z;
   }
-  const finalIdx = goodIdx.map(i => oldToNew.get(i));
-  const numVerts = newVerts.length;
-  log('ok', `Re-indexado: ${numVerts} vértices usados (de ${localPts.length} originais)`);
+  log('ok', `BBox: X[${xn.toFixed(0)}..${xx.toFixed(0)}] Y[${yn.toFixed(1)}..${yx.toFixed(1)}] Z[${zn.toFixed(0)}..${zx.toFixed(0)}]`);
+  stats['Desnível mesh'] = `${yn.toFixed(1)} – ${yx.toFixed(1)} m`;
 
-  // ── 4. Suavização Laplaciana (3 passes) ──────────────────────────
-  // O problema: curvas de nível têm todos os vértices na MESMA altitude.
-  // O Delaunator conecta vértices de curvas diferentes, criando degraus
-  // abruptos. A suavização Laplaciana media o Y de cada vértice com os 
-  // Y dos seus vizinhos, suavizando a transição entre curvas.
-  {
-    // Construir lista de adjacência (vizinhos de cada vértice)
-    const adj = Array.from({length:numVerts}, () => new Set());
-    for (let t = 0; t < finalIdx.length; t += 3) {
-      const a = finalIdx[t], b = finalIdx[t+1], c = finalIdx[t+2];
-      adj[a].add(b); adj[a].add(c);
-      adj[b].add(a); adj[b].add(c);
-      adj[c].add(a); adj[c].add(b);
-    }
-    // 3 passes de suavização (fator 0.5 = média entre valor atual e média dos vizinhos)
-    const PASSES = 3;
-    const FACTOR = 0.5;
-    for (let p = 0; p < PASSES; p++) {
-      const newY = new Float32Array(numVerts);
-      for (let i = 0; i < numVerts; i++) {
-        const neighbors = adj[i];
-        if (neighbors.size === 0) { newY[i] = newVerts[i].y; continue; }
-        let sum = 0;
-        for (const n of neighbors) sum += newVerts[n].y;
-        const avgNeighbor = sum / neighbors.size;
-        newY[i] = newVerts[i].y * (1 - FACTOR) + avgNeighbor * FACTOR;
-      }
-      for (let i = 0; i < numVerts; i++) newVerts[i] = { ...newVerts[i], y: newY[i] };
-    }
-    log('ok', `Laplacian smoothing: ${PASSES} passes (fator ${FACTOR})`);
-  }
+  const u16 = nV <= 65535;
+  const iCnt = filtIdx.length;
+  const iBytes = iCnt * (u16 ? 2 : 4);
+  const iBuf = u16 ? new Uint16Array(iCnt) : new Uint32Array(iCnt);
+  for (let i = 0; i < iCnt; i++) iBuf[i] = filtIdx[i];
 
-  // ── 5. Montar buffers binários ───────────────────────────────────
-  const vertBytes = numVerts * 3 * 4;
-  const vertBuf   = new Float32Array(numVerts * 3);
-  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity,zMin=Infinity,zMax=-Infinity;
-  for (let i = 0; i < numVerts; i++) {
-    const {x,y,z} = newVerts[i];
-    vertBuf[i*3]=x; vertBuf[i*3+1]=y; vertBuf[i*3+2]=z;
-    if(x<xMin)xMin=x;if(x>xMax)xMax=x;
-    if(y<yMin)yMin=y;if(y>yMax)yMax=y;
-    if(z<zMin)zMin=z;if(z>zMax)zMax=z;
-  }
-  log('ok', `BBox: X[${xMin.toFixed(0)}..${xMax.toFixed(0)}] Y[${yMin.toFixed(1)}..${yMax.toFixed(1)}] Z[${zMin.toFixed(0)}..${zMax.toFixed(0)}]`);
-  stats['Desnível mesh (m)'] = `${yMin.toFixed(1)} – ${yMax.toFixed(1)}`;
+  const iPad = Math.ceil(iBytes/4)*4;
+  const vOff = iPad;
+  const binLen = vOff + nV*3*4;
 
-  const useUint16  = numVerts <= 65535;
-  const idxCount   = finalIdx.length;
-  const idxBytes   = idxCount * (useUint16 ? 2 : 4);
-  const idxBuf     = useUint16 ? new Uint16Array(idxCount) : new Uint32Array(idxCount);
-  for (let i = 0; i < idxCount; i++) idxBuf[i] = finalIdx[i];
-
-  const idxPadded = Math.ceil(idxBytes / 4) * 4;
-  const vertOff   = idxPadded;
-  const totalBin  = vertOff + vertBytes;
-
-  // ── 5. Montar JSON do glTF ───────────────────────────────────────
-  const gltfJson = {
-    asset: { version: "2.0", generator: "KV-GeoSampa-TerrainBuilder" },
-    scene: 0,
-    scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0, name: "Relevo_GeoSampa" }],
-    meshes: [{
-      primitives: [{
-        attributes: { POSITION: 1 },
-        indices: 0,
-        material: 0,
-        mode: 4,
-      }]
-    }],
-    materials: [{
-      pbrMetallicRoughness: {
-        baseColorFactor: [0.29, 0.49, 0.35, 1.0],
-        metallicFactor: 0.0,
-        roughnessFactor: 0.9,
-      },
-      doubleSided: true,
-      name: "Terreno",
-    }],
-    accessors: [
-      {
-        bufferView: 0,
-        componentType: useUint16 ? 5123 : 5125,
-        count: idxCount,
-        type: "SCALAR",
-        max: [numVerts - 1],
-        min: [0],
-      },
-      {
-        bufferView: 1,
-        componentType: 5126,
-        count: numVerts,
-        type: "VEC3",
-        max: [xMax, yMax, zMax],
-        min: [xMin, yMin, zMin],
-      },
+  // ── 4. JSON glTF ─────────────────────────────────────────────────
+  const gj = {
+    asset:{version:"2.0",generator:"KV-GeoSampa"},
+    scene:0, scenes:[{nodes:[0]}],
+    nodes:[{mesh:0,name:"Relevo_GeoSampa"}],
+    meshes:[{primitives:[{attributes:{POSITION:1},indices:0,material:0,mode:4}]}],
+    materials:[{pbrMetallicRoughness:{baseColorFactor:[.29,.49,.35,1],metallicFactor:0,roughnessFactor:.9},doubleSided:true,name:"Terreno"}],
+    accessors:[
+      {bufferView:0,componentType:u16?5123:5125,count:iCnt,type:"SCALAR",max:[nV-1],min:[0]},
+      {bufferView:1,componentType:5126,count:nV,type:"VEC3",max:[xx,yx,zx],min:[xn,yn,zn]},
     ],
-    bufferViews: [
-      { buffer: 0, byteOffset: 0, byteLength: idxBytes, target: 34963 },
-      { buffer: 0, byteOffset: vertOff, byteLength: vertBytes, target: 34962 },
+    bufferViews:[
+      {buffer:0,byteOffset:0,byteLength:iBytes,target:34963},
+      {buffer:0,byteOffset:vOff,byteLength:nV*3*4,target:34962},
     ],
-    buffers: [{ byteLength: totalBin }],
+    buffers:[{byteLength:binLen}],
   };
 
-  // ── 6. Montar o GLB ──────────────────────────────────────────────
-  const jsonStr    = JSON.stringify(gltfJson);
-  const jsonPadded = jsonStr + ' '.repeat((4 - (jsonStr.length % 4)) % 4);
-  const jsonBytes  = new TextEncoder().encode(jsonPadded);
-  const totalSize  = 12 + (8 + jsonBytes.length) + (8 + totalBin);
-  const glb = new ArrayBuffer(totalSize);
-  const dv  = new DataView(glb);
-  const u8  = new Uint8Array(glb);
-  let off = 0;
-  dv.setUint32(off, 0x46546C67, true); off+=4;
-  dv.setUint32(off, 2, true);          off+=4;
-  dv.setUint32(off, totalSize, true);  off+=4;
-  dv.setUint32(off, jsonBytes.length, true); off+=4;
-  dv.setUint32(off, 0x4E4F534A, true);      off+=4;
-  u8.set(jsonBytes, off);                    off+=jsonBytes.length;
-  dv.setUint32(off, totalBin, true);    off+=4;
-  dv.setUint32(off, 0x004E4942, true);  off+=4;
-  const binU8 = new Uint8Array(totalBin);
-  binU8.set(new Uint8Array(idxBuf.buffer), 0);
-  binU8.set(new Uint8Array(vertBuf.buffer), vertOff);
-  u8.set(binU8, off);
-
-  log('ok', `GLB: ${(totalSize/1024).toFixed(1)} KB · ${numVerts} verts · ${finalTris} tris`);
-  return Promise.resolve(new Blob([glb], { type: 'model/gltf-binary' }));
+  // ── 5. Montar GLB ────────────────────────────────────────────────
+  const js = JSON.stringify(gj);
+  const jp = js + ' '.repeat((4-(js.length%4))%4);
+  const jb = new TextEncoder().encode(jp);
+  const tot = 12 + 8+jb.length + 8+binLen;
+  const glb = new ArrayBuffer(tot);
+  const dv = new DataView(glb);
+  const u8 = new Uint8Array(glb);
+  let o = 0;
+  dv.setUint32(o,0x46546C67,true);o+=4;
+  dv.setUint32(o,2,true);o+=4;
+  dv.setUint32(o,tot,true);o+=4;
+  dv.setUint32(o,jb.length,true);o+=4;
+  dv.setUint32(o,0x4E4F534A,true);o+=4;
+  u8.set(jb,o);o+=jb.length;
+  dv.setUint32(o,binLen,true);o+=4;
+  dv.setUint32(o,0x004E4942,true);o+=4;
+  const bin = new Uint8Array(binLen);
+  bin.set(new Uint8Array(iBuf.buffer),0);
+  bin.set(new Uint8Array(vBuf.buffer),vOff);
+  u8.set(bin,o);
+  log('ok', `GLB: ${(tot/1024).toFixed(1)}KB · ${nV} verts · ${nTris} tris`);
+  return Promise.resolve(new Blob([glb], {type:'model/gltf-binary'}));
 }
+
 
 // Download automático
 function downloadBlob(blob, filename) {
