@@ -102,16 +102,24 @@
       </div>
 
       <div class="card">
-        <div class="card-l">Buffer / Exagero vertical</div>
+        <div class="card-l">Buffer / Exagero vertical / Rotação norte</div>
         <div class="srow" style="margin-bottom:6px">
           <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Buffer</span>
           <input type="range" id="bufSlider" min="50" max="400" step="25" value="150" oninput="updBuf(this.value)">
           <div class="sv" id="bufVal">150 m</div>
         </div>
-        <div class="srow">
+        <div class="srow" style="margin-bottom:6px">
           <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Exagero Z</span>
           <input type="range" id="zSlider" min="1" max="20" step="1" value="3" oninput="updZ(this.value)">
           <div class="sv" id="zVal">3×</div>
+        </div>
+        <div class="srow">
+          <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Rotação °</span>
+          <input type="range" id="rotSlider" min="-180" max="180" step="5" value="0" oninput="updRot(this.value)">
+          <div class="sv" id="rotVal">0°</div>
+        </div>
+        <div style="font-family:var(--m);font-size:8px;color:var(--mut);margin-top:4px;line-height:1.5">
+          Se o modelo aparecer girado no mapa, ajuste a rotação aqui e gere novamente.
         </div>
         <div class="bbox-g">
           <div class="bbox-i"><label>OESTE</label><span id="bW">—</span></div>
@@ -377,10 +385,15 @@ function buildAndExportGLB(localPts, stats) {
   const binLen = vOff + nV*3*4;
 
   // ── 4. JSON glTF ─────────────────────────────────────────────────
+  // Rotação ao redor do eixo Y (vertical) para alinhar norte
+  // Quaternion Y-rotation: [0, sin(θ/2), 0, cos(θ/2)]
+  const rotRad = rotDeg * Math.PI / 180;
+  const qY = [0, Math.sin(rotRad/2), 0, Math.cos(rotRad/2)];
+
   const gj = {
     asset:{version:"2.0",generator:"KV-GeoSampa"},
     scene:0, scenes:[{nodes:[0]}],
-    nodes:[{mesh:0,name:"Relevo_GeoSampa"}],
+    nodes:[{mesh:0, name:"Relevo_GeoSampa", rotation:qY}],
     meshes:[{primitives:[{attributes:{POSITION:1},indices:0,material:0,mode:4}]}],
     materials:[{pbrMetallicRoughness:{baseColorFactor:[.29,.49,.35,1],metallicFactor:0,roughnessFactor:.9},doubleSided:true,name:"Terreno"}],
     accessors:[
@@ -435,7 +448,7 @@ function downloadBlob(blob, filename) {
 // ═══════════════════════════════════════════════════════════════════════
 // ESTADO
 // ═══════════════════════════════════════════════════════════════════════
-let baseBbox = null, bufM = 150, exagZ = 3, busy = false;
+let baseBbox = null, bufM = 150, exagZ = 3, rotDeg = 0, busy = false;
 
 // ═══════════════════════════════════════════════════════════════════════
 // UI
@@ -443,6 +456,7 @@ let baseBbox = null, bufM = 150, exagZ = 3, busy = false;
 window.ST     = id => { document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id)); document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===`panel-${id}`)); };
 window.updBuf = v  => { bufM=parseInt(v); document.getElementById('bufVal').textContent=`${v} m`; if(baseBbox)showBbox(); };
 window.updZ   = v  => { exagZ=parseInt(v); document.getElementById('zVal').textContent=`${v}×`; };
+window.updRot = v  => { rotDeg=parseInt(v); document.getElementById('rotVal').textContent=`${v}°`; };
 window.clrLog = ()  => { document.getElementById('logWrap').innerHTML=''; };
 
 function setSt(c,m) { document.getElementById('dot').className=`dot ${c}`; const t=document.getElementById('stTxt'); t.className=`ptxt ${c}`; t.textContent=m; }
@@ -562,18 +576,17 @@ async function pipeline() {
     stats['Centro (lng)'] = centerLng.toFixed(6);
     stats['Centro (lat)'] = centerLat.toFixed(6);
     stats['Datum (m)'] = datum.toFixed(1);
+    stats['Rotação norte'] = `${rotDeg}°`;
 
     log('ok','──────────────────────────────────────');
-    log('ok',`📍 CENTRO DO MODELO: ${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`);
-    log('ok',`🧭 Orientação: +X = Leste · +Z = Sul · Y = Altitude`);
+    log('ok',`📍 CENTRO: ${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`);
+    log('ok',`🧭 Eixos: +X=Leste · Y=Altitude · -Z=Norte`);
+    log('ok',`🔄 Rotação norte: ${rotDeg}°`);
     log('ok',`📏 Escala: 1 unidade = 1 metro · Exagero Z = ${exagZ}×`);
-    log('ok',`⛰ Datum: ${datum.toFixed(1)}m (Y=0 no modelo = ${datum.toFixed(1)}m na realidade)`);
+    log('ok',`⛰ Datum: ${datum.toFixed(1)}m (Y=0 = ${datum.toFixed(1)}m real)`);
     log('ok','──────────────────────────────────────');
-    log('in','Para posicionar no Giraffe:');
-    log('in','  1. Arraste o .glb para o projeto');
-    log('in','  2. O modelo aparece no ponto de clique');
-    log('in','  3. Ajuste a posição para o ponto central acima');
-    log('in','  4. O norte do modelo = direção -Z do GLB');
+    log('in','Se o modelo aparecer girado no Giraffe:');
+    log('in','  → Ajuste o slider Rotação ° e gere novamente');
 
     // Stats
     const grid = document.getElementById('statsGrid');
