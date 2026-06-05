@@ -6,8 +6,6 @@
   <title>KV — Relevo 3D → GLB</title>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
   <script src="https://unpkg.com/delaunator@5.0.0/delaunator.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Hind:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -324,84 +322,141 @@ function toLocalMeters(pts, centerLng, centerLat, datum, exagero) {
 // TRIANGULAÇÃO + MESH + GLB EXPORT
 // ═══════════════════════════════════════════════════════════════════════
 function buildAndExportGLB(localPts, stats) {
-  // 1. Delaunator — triangula no plano XZ (2D), altitude vai em Y
+  // ── 1. Delaunator — triangula no plano XZ (2D) ──────────────────
   const coords2D = localPts.map(p => [p.x, p.z]);
-
-  log('in', `Delaunator input: ${coords2D.length} pontos`);
-  log('in', `  Ponto 0: x=${localPts[0].x.toFixed(1)} y=${localPts[0].y.toFixed(1)} z=${localPts[0].z.toFixed(1)}`);
-  log('in', `  Ponto último: x=${localPts.at(-1).x.toFixed(1)} y=${localPts.at(-1).y.toFixed(1)} z=${localPts.at(-1).z.toFixed(1)}`);
-
   const delaunay = Delaunator.from(coords2D);
   const numTris = delaunay.triangles.length / 3;
   log('ok', `Delaunator: ${numTris} triângulos · ${localPts.length} vértices`);
   stats['Triângulos'] = numTris;
+  if (numTris === 0) throw new Error('0 triângulos — pontos podem ser colineares.');
 
-  if (numTris === 0) throw new Error('Delaunator gerou 0 triângulos — pontos podem ser colineares.');
-
-  // 2. Three.js BufferGeometry
-  const vertices = new Float32Array(localPts.length * 3);
-  let yMin = Infinity, yMax = -Infinity;
-  for (let i = 0; i < localPts.length; i++) {
-    vertices[i*3]     = localPts[i].x;
-    vertices[i*3 + 1] = localPts[i].y;
-    vertices[i*3 + 2] = localPts[i].z;
-    if (localPts[i].y < yMin) yMin = localPts[i].y;
-    if (localPts[i].y > yMax) yMax = localPts[i].y;
+  // ── 2. Montar buffers binários (vértices + índices) ──────────────
+  // Vértices: Float32, 3 componentes (x, y, z) por vértice
+  const numVerts  = localPts.length;
+  const vertBytes = numVerts * 3 * 4; // 3 floats × 4 bytes
+  const vertBuf   = new Float32Array(numVerts * 3);
+  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity,zMin=Infinity,zMax=-Infinity;
+  for (let i = 0; i < numVerts; i++) {
+    const {x,y,z} = localPts[i];
+    vertBuf[i*3]=x; vertBuf[i*3+1]=y; vertBuf[i*3+2]=z;
+    if(x<xMin)xMin=x;if(x>xMax)xMax=x;
+    if(y<yMin)yMin=y;if(y>yMax)yMax=y;
+    if(z<zMin)zMin=z;if(z>zMax)zMax=z;
   }
-  log('ok', `Altitudes no mesh: Y_min=${yMin.toFixed(1)} Y_max=${yMax.toFixed(1)} (com exagero ${exagZ}×)`);
+  log('ok', `Mesh BBox: X[${xMin.toFixed(0)}..${xMax.toFixed(0)}] Y[${yMin.toFixed(1)}..${yMax.toFixed(1)}] Z[${zMin.toFixed(0)}..${zMax.toFixed(0)}]`);
+  stats['Desnível mesh (m)'] = `${yMin.toFixed(1)} – ${yMax.toFixed(1)}`;
 
-  const indices = new Uint32Array(delaunay.triangles);
+  // Índices: Uint32 se > 65535 vértices, senão Uint16
+  const useUint16  = numVerts <= 65535;
+  const idxCount   = delaunay.triangles.length;
+  const idxBytes   = idxCount * (useUint16 ? 2 : 4);
+  const idxBuf     = useUint16
+    ? new Uint16Array(idxCount)
+    : new Uint32Array(idxCount);
+  for (let i = 0; i < idxCount; i++) idxBuf[i] = delaunay.triangles[i];
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeVertexNormals();
+  // Padding para alinhamento de 4 bytes
+  const idxPadded = Math.ceil(idxBytes / 4) * 4;
+  const vertOff   = idxPadded;
+  const totalBin  = vertOff + vertBytes;
 
-  // Bounding box do mesh para log
-  geometry.computeBoundingBox();
-  const bb = geometry.boundingBox;
-  log('ok', `Mesh BBox: X[${bb.min.x.toFixed(0)}..${bb.max.x.toFixed(0)}] Y[${bb.min.y.toFixed(1)}..${bb.max.y.toFixed(1)}] Z[${bb.min.z.toFixed(0)}..${bb.max.z.toFixed(0)}]`);
-  stats['Bbox X (m)'] = `${bb.min.x.toFixed(0)} – ${bb.max.x.toFixed(0)}`;
-  stats['Bbox Y (m)'] = `${bb.min.y.toFixed(1)} – ${bb.max.y.toFixed(1)}`;
+  // ── 3. Montar JSON do glTF ───────────────────────────────────────
+  const gltfJson = {
+    asset: { version: "2.0", generator: "KV-GeoSampa-TerrainBuilder" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0, name: "Relevo_GeoSampa" }],
+    meshes: [{
+      primitives: [{
+        attributes: { POSITION: 1 },
+        indices: 0,
+        material: 0,
+        mode: 4, // TRIANGLES
+      }]
+    }],
+    materials: [{
+      pbrMetallicRoughness: {
+        baseColorFactor: [0.29, 0.49, 0.35, 1.0], // #4a7c59
+        metallicFactor: 0.0,
+        roughnessFactor: 0.9,
+      },
+      doubleSided: true,
+      name: "Terreno",
+    }],
+    accessors: [
+      // 0 = índices
+      {
+        bufferView: 0,
+        componentType: useUint16 ? 5123 : 5125, // UNSIGNED_SHORT ou UNSIGNED_INT
+        count: idxCount,
+        type: "SCALAR",
+        max: [numVerts - 1],
+        min: [0],
+      },
+      // 1 = posições (vértices)
+      {
+        bufferView: 1,
+        componentType: 5126, // FLOAT
+        count: numVerts,
+        type: "VEC3",
+        max: [xMax, yMax, zMax],
+        min: [xMin, yMin, zMin],
+      },
+    ],
+    bufferViews: [
+      // 0 = índices
+      { buffer: 0, byteOffset: 0, byteLength: idxBytes, target: 34963 }, // ELEMENT_ARRAY_BUFFER
+      // 1 = vértices
+      { buffer: 0, byteOffset: vertOff, byteLength: vertBytes, target: 34962 }, // ARRAY_BUFFER
+    ],
+    buffers: [{ byteLength: totalBin }],
+  };
 
-  // 3. Material — MeshBasicMaterial é mais compatível com visualizadores GLB
-  //    (MeshStandardMaterial precisa de luzes na cena)
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x4a7c59,
-    side: THREE.DoubleSide,
-    wireframe: false,
-  });
+  // ── 4. Montar o GLB (binary glTF container) ──────────────────────
+  // GLB = Header(12) + JSONChunk(8+jsonLen) + BINChunk(8+binLen)
+  const jsonStr = JSON.stringify(gltfJson);
+  // JSON precisa ser padded com espaços para alinhamento de 4 bytes
+  const jsonPadded = jsonStr + ' '.repeat((4 - (jsonStr.length % 4)) % 4);
+  const jsonBytes  = new TextEncoder().encode(jsonPadded);
 
-  // 4. Mesh
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'Relevo_GeoSampa';
+  // Buffer binário: índices (padded) + vértices
+  const binData = new ArrayBuffer(totalBin);
+  const binView = new DataView(binData);
+  // Copiar índices
+  const idxSrc = new Uint8Array(idxBuf.buffer);
+  const binU8  = new Uint8Array(binData);
+  binU8.set(idxSrc, 0);
+  // Copiar vértices
+  const vertSrc = new Uint8Array(vertBuf.buffer);
+  binU8.set(vertSrc, vertOff);
 
-  // 5. Scene
-  const scene = new THREE.Scene();
-  scene.add(mesh);
+  // GLB total size
+  const totalSize = 12 + (8 + jsonBytes.length) + (8 + totalBin);
 
-  // 6. GLTFExporter → GLB (binary)
-  // ATENÇÃO: Three.js r128 GLTFExporter.parse tem 3 args: (input, onDone, options)
-  // NÃO tem callback de erro separado (adicionado em versões posteriores).
-  return new Promise((resolve, reject) => {
-    try {
-      const exporter = new THREE.GLTFExporter();
-      exporter.parse(scene, (result) => {
-        log('ok', `GLTFExporter: result type = ${result?.constructor?.name}, size = ${result?.byteLength ?? JSON.stringify(result)?.length ?? '?'} bytes`);
-        if (result instanceof ArrayBuffer) {
-          // Binário GLB — perfeito
-          resolve(new Blob([result], { type: 'model/gltf-binary' }));
-        } else {
-          // JSON (fallback se binary:true não funcionou) — salva como .gltf
-          const json = JSON.stringify(result);
-          log('wn', 'GLTFExporter retornou JSON em vez de binário. Salvando como .gltf...');
-          resolve(new Blob([json], { type: 'application/json' }));
-        }
-      }, { binary: true }); // <-- 3 argumentos: scene, callback, options
-    } catch(e) {
-      reject(new Error(`GLTFExporter: ${e.message}`));
-    }
-  });
+  // Montar o ArrayBuffer final
+  const glb = new ArrayBuffer(totalSize);
+  const dv  = new DataView(glb);
+  const u8  = new Uint8Array(glb);
+  let offset = 0;
+
+  // Header (12 bytes)
+  dv.setUint32(offset, 0x46546C67, true); offset += 4; // magic "glTF"
+  dv.setUint32(offset, 2, true);          offset += 4; // version 2
+  dv.setUint32(offset, totalSize, true);  offset += 4; // total length
+
+  // JSON chunk
+  dv.setUint32(offset, jsonBytes.length, true); offset += 4; // chunk length
+  dv.setUint32(offset, 0x4E4F534A, true);      offset += 4; // chunk type "JSON"
+  u8.set(jsonBytes, offset);                    offset += jsonBytes.length;
+
+  // BIN chunk
+  dv.setUint32(offset, totalBin, true);    offset += 4; // chunk length
+  dv.setUint32(offset, 0x004E4942, true);  offset += 4; // chunk type "BIN\0"
+  u8.set(binU8, offset);                   offset += totalBin;
+
+  log('ok', `GLB construído: ${(totalSize/1024).toFixed(1)} KB · ${numVerts} verts · ${numTris} tris`);
+
+  return Promise.resolve(new Blob([glb], { type: 'model/gltf-binary' }));
 }
 
 // Download automático
@@ -572,7 +627,7 @@ window.onerror = (msg, src, line, col, err) => {
 // ═══════════════════════════════════════════════════════════════════════
 loadProxy();
 log('ok','SDK pronto · KV Arquitetos · Relevo 3D → GLB');
-log('in',`Three.js ${THREE.REVISION} · Delaunator · Turf.js · GLTFExporter`);
+log('in','Delaunator · Turf.js · GLB builder manual');
 </script>
 </body>
 </html>
