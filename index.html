@@ -326,32 +326,50 @@ function toLocalMeters(pts, centerLng, centerLat, datum, exagero) {
 function buildAndExportGLB(localPts, stats) {
   // 1. Delaunator — triangula no plano XZ (2D), altitude vai em Y
   const coords2D = localPts.map(p => [p.x, p.z]);
+
+  log('in', `Delaunator input: ${coords2D.length} pontos`);
+  log('in', `  Ponto 0: x=${localPts[0].x.toFixed(1)} y=${localPts[0].y.toFixed(1)} z=${localPts[0].z.toFixed(1)}`);
+  log('in', `  Ponto último: x=${localPts.at(-1).x.toFixed(1)} y=${localPts.at(-1).y.toFixed(1)} z=${localPts.at(-1).z.toFixed(1)}`);
+
   const delaunay = Delaunator.from(coords2D);
   const numTris = delaunay.triangles.length / 3;
-  log('ok', `Delaunator: ${numTris} triângulos gerados`);
+  log('ok', `Delaunator: ${numTris} triângulos · ${localPts.length} vértices`);
   stats['Triângulos'] = numTris;
+
+  if (numTris === 0) throw new Error('Delaunator gerou 0 triângulos — pontos podem ser colineares.');
 
   // 2. Three.js BufferGeometry
   const vertices = new Float32Array(localPts.length * 3);
+  let yMin = Infinity, yMax = -Infinity;
   for (let i = 0; i < localPts.length; i++) {
-    vertices[i*3]     = localPts[i].x;  // X
-    vertices[i*3 + 1] = localPts[i].y;  // Y (altitude)
-    vertices[i*3 + 2] = localPts[i].z;  // Z
+    vertices[i*3]     = localPts[i].x;
+    vertices[i*3 + 1] = localPts[i].y;
+    vertices[i*3 + 2] = localPts[i].z;
+    if (localPts[i].y < yMin) yMin = localPts[i].y;
+    if (localPts[i].y > yMax) yMax = localPts[i].y;
   }
+  log('ok', `Altitudes no mesh: Y_min=${yMin.toFixed(1)} Y_max=${yMax.toFixed(1)} (com exagero ${exagZ}×)`);
 
   const indices = new Uint32Array(delaunay.triangles);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeVertexNormals(); // iluminação suave
+  geometry.computeVertexNormals();
 
-  // 3. Material
-  const material = new THREE.MeshStandardMaterial({
+  // Bounding box do mesh para log
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  log('ok', `Mesh BBox: X[${bb.min.x.toFixed(0)}..${bb.max.x.toFixed(0)}] Y[${bb.min.y.toFixed(1)}..${bb.max.y.toFixed(1)}] Z[${bb.min.z.toFixed(0)}..${bb.max.z.toFixed(0)}]`);
+  stats['Bbox X (m)'] = `${bb.min.x.toFixed(0)} – ${bb.max.x.toFixed(0)}`;
+  stats['Bbox Y (m)'] = `${bb.min.y.toFixed(1)} – ${bb.max.y.toFixed(1)}`;
+
+  // 3. Material — MeshBasicMaterial é mais compatível com visualizadores GLB
+  //    (MeshStandardMaterial precisa de luzes na cena)
+  const material = new THREE.MeshBasicMaterial({
     color: 0x4a7c59,
-    roughness: 0.85,
-    metalness: 0.1,
     side: THREE.DoubleSide,
+    wireframe: false,
   });
 
   // 4. Mesh
@@ -363,15 +381,26 @@ function buildAndExportGLB(localPts, stats) {
   scene.add(mesh);
 
   // 6. GLTFExporter → GLB (binary)
+  // ATENÇÃO: Three.js r128 GLTFExporter.parse tem 3 args: (input, onDone, options)
+  // NÃO tem callback de erro separado (adicionado em versões posteriores).
   return new Promise((resolve, reject) => {
-    const exporter = new THREE.GLTFExporter();
-    exporter.parse(scene, (result) => {
-      // result é um ArrayBuffer (binário GLB)
-      const blob = new Blob([result], { type: 'model/gltf-binary' });
-      resolve(blob);
-    }, (error) => {
-      reject(new Error(`GLTFExporter: ${error}`));
-    }, { binary: true });
+    try {
+      const exporter = new THREE.GLTFExporter();
+      exporter.parse(scene, (result) => {
+        log('ok', `GLTFExporter: result type = ${result?.constructor?.name}, size = ${result?.byteLength ?? JSON.stringify(result)?.length ?? '?'} bytes`);
+        if (result instanceof ArrayBuffer) {
+          // Binário GLB — perfeito
+          resolve(new Blob([result], { type: 'model/gltf-binary' }));
+        } else {
+          // JSON (fallback se binary:true não funcionou) — salva como .gltf
+          const json = JSON.stringify(result);
+          log('wn', 'GLTFExporter retornou JSON em vez de binário. Salvando como .gltf...');
+          resolve(new Blob([json], { type: 'application/json' }));
+        }
+      }, { binary: true }); // <-- 3 argumentos: scene, callback, options
+    } catch(e) {
+      reject(new Error(`GLTFExporter: ${e.message}`));
+    }
   });
 }
 
@@ -496,12 +525,20 @@ async function pipeline() {
     setSt('run','⑤ Exportando GLB (Three.js)...');
     const blob = await buildAndExportGLB(localPts, stats);
     const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
-    stats['Arquivo GLB'] = `${sizeMB} MB`;
-    log('ok',`GLB gerado: ${sizeMB} MB`);
+    const sizeKB = (blob.size / 1024).toFixed(0);
+    stats['Arquivo'] = blob.size > 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
+    log('ok',`Arquivo gerado: ${blob.size > 1048576 ? sizeMB+' MB' : sizeKB+' KB'}`);
+
+    if (blob.size < 100) {
+      log('er','⚠ Arquivo muito pequeno — pode estar vazio. Verifique os logs acima.');
+      throw new Error('Arquivo GLB gerado é muito pequeno (< 100 bytes). Geometria pode estar inválida.');
+    }
 
     // ── ⑥ DOWNLOAD ───────────────────────────────────────────────
-    downloadBlob(blob, 'relevo_geosampa.glb');
-    log('ok','✓ Download iniciado! Arraste o .glb para o projeto no Giraffe.');
+    const ext = blob.type.includes('json') ? '.gltf' : '.glb';
+    downloadBlob(blob, `relevo_geosampa${ext}`);
+    log('ok',`✓ Download iniciado: relevo_geosampa${ext}`);
+    log('ok','Arraste o arquivo para o projeto no Giraffe.');
 
     // Stats
     const grid = document.getElementById('statsGrid');
