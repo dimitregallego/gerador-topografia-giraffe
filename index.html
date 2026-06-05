@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>KV — Perfil de Terreno 3D</title>
+  <title>KV — Topografia 3D</title>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -11,17 +11,17 @@
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
-      --kv-blue:#00ACCD;--kv-blue-dim:#007f99;
+      --kv-blue:#00ACCD;--kv-dim:#007f99;
       --bg:#0a0a0a;--s1:#111;--s2:#1a1a1a;--border:#252525;--border2:#333;
-      --text:#e8e8e8;--muted:#666;--green:#3ddba0;--green-dim:#1f7a5c;
-      --warn:#f5a623;--error:#ff5f72;
+      --text:#e8e8e8;--muted:#666;--green:#3ddba0;--gdim:#1f7a5c;
+      --warn:#f5a623;--err:#ff5f72;
       --mono:'IBM Plex Mono',monospace;--sans:'Hind',sans-serif;--r:6px;
     }
     html,body{height:100%;width:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;overflow:hidden}
     .shell{display:flex;flex-direction:column;height:100vh}
-    .header{background:#000;padding:12px 16px 10px;flex-shrink:0;border-bottom:2px solid var(--kv-blue)}
-    .kv-title{font-family:var(--mono);font-size:12px;font-weight:500;color:#fff;letter-spacing:.04em}
-    .kv-sub{font-family:var(--mono);font-size:8.5px;color:var(--kv-blue);letter-spacing:.12em;text-transform:uppercase;margin-top:4px}
+    .hdr{background:#000;padding:12px 16px 10px;flex-shrink:0;border-bottom:2px solid var(--kv-blue)}
+    .hdr-t{font-family:var(--mono);font-size:12px;font-weight:500;color:#fff;letter-spacing:.04em}
+    .hdr-s{font-family:var(--mono);font-size:8.5px;color:var(--kv-blue);letter-spacing:.12em;text-transform:uppercase;margin-top:4px}
     .tabs{display:flex;padding:0 16px;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0}
     .tab{padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s;user-select:none;white-space:nowrap}
     .tab.active{color:var(--kv-blue);border-bottom-color:var(--kv-blue)}
@@ -30,62 +30,60 @@
     .panel{display:none;flex-direction:column;height:100%;overflow-y:auto;padding:12px 14px 14px;gap:10px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
     .panel.active{display:flex}
     .card{background:var(--s1);border:1px solid var(--border);border-radius:var(--r);padding:12px}
-    .card-label{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+    .card-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
     .pill{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--s2);border:1px solid var(--border);border-radius:var(--r)}
     .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-    .dot.idle{background:var(--muted)}.dot.run{background:var(--warn);animation:blink .6s infinite}.dot.ok{background:var(--green)}.dot.err{background:var(--error)}
+    .dot.idle{background:var(--muted)}.dot.run{background:var(--warn);animation:blink .6s infinite}.dot.ok{background:var(--green)}.dot.err{background:var(--err)}
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-    .pill-txt{font-size:11px;font-weight:500;flex:1}
-    .pill-txt.idle{color:var(--muted)}.pill-txt.run{color:var(--warn)}.pill-txt.ok{color:var(--green)}.pill-txt.err{color:var(--error)}
+    .ptxt{font-size:11px;font-weight:500;flex:1}
+    .ptxt.idle{color:var(--muted)}.ptxt.run{color:var(--warn)}.ptxt.ok{color:var(--green)}.ptxt.err{color:var(--err)}
     .btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:var(--r);border:none;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s}
     .btn:active{transform:scale(.97)}.btn:disabled{opacity:.4;cursor:not-allowed}
-    .btn-p{background:var(--kv-blue);color:#000;width:100%}.btn-p:hover:not(:disabled){background:var(--kv-blue-dim)}
+    .btn-p{background:var(--kv-blue);color:#000;width:100%}.btn-p:hover:not(:disabled){background:var(--kv-dim)}
     .btn-g{background:var(--s2);border:1px solid var(--border);color:var(--text)}.btn-g:hover:not(:disabled){border-color:var(--kv-blue);color:var(--kv-blue)}
     .btn-sm{padding:5px 10px;font-size:10px}
     .brow{display:flex;gap:8px}
-    .slider-row{display:flex;align-items:center;gap:10px}
+    .srow{display:flex;align-items:center;gap:10px}
     input[type=range]{flex:1;appearance:none;height:3px;background:var(--border2);border-radius:2px;outline:none;cursor:pointer}
     input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--kv-blue);border:2px solid var(--bg);cursor:pointer}
     .sv{font-family:var(--mono);font-size:11px;color:var(--kv-blue);min-width:44px;text-align:right}
-    .bbox-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-    .bbox-item{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:6px 8px}
-    .bbox-item label{font-family:var(--mono);font-size:8px;color:var(--muted);display:block;margin-bottom:2px}
-    .bbox-item span{font-family:var(--mono);font-size:11px;color:var(--kv-blue)}
+    .bbox-g{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+    .bbox-i{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:6px 8px}
+    .bbox-i label{font-family:var(--mono);font-size:8px;color:var(--muted);display:block;margin-bottom:2px}
+    .bbox-i span{font-family:var(--mono);font-size:11px;color:var(--kv-blue)}
     .ll{display:flex;flex-direction:column;gap:5px}
     .li{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--s2);border:1px solid var(--border);border-radius:var(--r)}
     .sw{width:12px;height:12px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
-    .li-info{flex:1;min-width:0}
-    .li-name{font-size:12px;font-weight:500;color:var(--text)}
-    .li-meta{font-family:var(--mono);font-size:9px;color:var(--muted)}
+    .li-i{flex:1;min-width:0}
+    .li-n{font-size:12px;font-weight:500;color:var(--text)}
+    .li-m{font-family:var(--mono);font-size:9px;color:var(--muted)}
     .lb{font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;flex-shrink:0}
     .lb.w{background:rgba(90,90,90,.15);color:var(--muted);border:1px solid var(--border)}
-    .lb.ok{background:rgba(61,219,160,.12);color:var(--green);border:1px solid var(--green-dim)}
-    .lb.err{background:rgba(255,95,114,.08);color:var(--error);border:1px solid rgba(255,95,114,.25)}
-    .pw{background:var(--border);border-radius:3px;height:3px;overflow:hidden}
+    .lb.ok{background:rgba(61,219,160,.12);color:var(--green);border:1px solid var(--gdim)}
+    .lb.err{background:rgba(255,95,114,.08);color:var(--err);border:1px solid rgba(255,95,114,.25)}
+    .pw{background:var(--border);border-radius:3px;height:4px;overflow:hidden;margin-bottom:10px}
     .pb{height:100%;background:var(--kv-blue);border-radius:3px;transition:width .35s ease}
-    .sl{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto}
+    .sl{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto}
     .si{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--s2);border:1px solid var(--border);border-radius:var(--r);animation:fi .2s}
     @keyframes fi{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-    .si-name{font-size:11px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .si-st{font-family:var(--mono);font-size:9px;flex-shrink:0}
-    .si-st.p{color:var(--muted)}.si-st.r{color:var(--warn)}.si-st.d{color:var(--green)}.si-st.f{color:var(--error)}
+    .si-n{font-size:11px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .si-s{font-family:var(--mono);font-size:9px;flex-shrink:0}
+    .si-s.p{color:var(--muted)}.si-s.r{color:var(--warn)}.si-s.d{color:var(--green)}.si-s.f{color:var(--err)}
     .sg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
     .sc{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px}
     .sc-l{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
     .sc-v{font-family:var(--mono);font-size:15px;font-weight:500;color:var(--kv-blue);margin-top:2px}
     .lw{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
-    .le{display:flex;gap:7px;font-family:var(--mono);font-size:10px;padding:4px 6px;border-radius:4px;background:var(--s2);animation:fi .15s}
-    .le.ok{color:var(--green)}.le.wn{color:var(--warn)}.le.er{color:var(--error)}.le.in{color:var(--muted)}
+    .le{display:flex;gap:7px;font-family:var(--mono);font-size:10px;padding:4px 6px;border-radius:4px;background:var(--s2)}
+    .le.ok{color:var(--green)}.le.wn{color:var(--warn)}.le.er{color:var(--err)}.le.in{color:var(--muted)}
     .lt{opacity:.5;flex-shrink:0}
-    .ml{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;display:block}
     .pi{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:7px 9px;color:var(--text);font-family:var(--mono);font-size:10px;outline:none;width:100%;transition:border-color .15s}
     .pi:focus{border-color:var(--kv-blue)}.pi::placeholder{color:var(--muted)}
     .ps{font-family:var(--mono);font-size:9px;margin-top:5px;padding:5px 8px;border-radius:5px;display:none}
-    .ps.ok{background:rgba(61,219,160,.08);border:1px solid var(--green-dim);color:var(--green)}
-    .ps.fail{background:rgba(255,95,114,.08);border:1px solid rgba(255,95,114,.3);color:var(--error)}
+    .ps.ok{background:rgba(61,219,160,.08);border:1px solid var(--gdim);color:var(--green)}
+    .ps.fail{background:rgba(255,95,114,.08);border:1px solid rgba(255,95,114,.3);color:var(--err)}
     .ps.test{background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.3);color:var(--warn)}
-    .cb{background:var(--s2);border:1px solid var(--border);border-radius:5px;padding:10px;font-size:9px;font-family:var(--mono);color:var(--muted);line-height:1.6;overflow-x:auto;white-space:pre;max-height:140px;overflow-y:auto}
-    .props-box{background:var(--s2);border:1px solid var(--kv-blue-dim);border-radius:var(--r);padding:10px;font-family:var(--mono);font-size:9px;color:var(--text);line-height:1.8;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+    .cb{background:var(--s2);border:1px solid var(--border);border-radius:5px;padding:10px;font-size:9px;font-family:var(--mono);color:var(--muted);line-height:1.6;overflow-x:auto;white-space:pre;max-height:130px;overflow-y:auto}
     .ib{background:rgba(0,172,205,.05);border:1px solid rgba(0,172,205,.15);border-radius:var(--r);padding:8px 10px;font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.7}
     .ib strong{color:var(--kv-blue)}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
@@ -93,28 +91,27 @@
 </head>
 <body>
 <div class="shell">
-  <div class="header">
-    <div class="kv-title">Königsberger Vannucchi · Perfil de Terreno 3D</div>
-    <div class="kv-sub">GeoSampa WFS · TIN 3D + Layers Separados → Giraffe</div>
+  <div class="hdr">
+    <div class="hdr-t">Königsberger Vannucchi · Topografia 3D</div>
+    <div class="hdr-s">GeoSampa WFS · TIN Turf.js · Layers Separados → Giraffe</div>
   </div>
   <div class="tabs">
-    <div class="tab active" data-tab="setup"    onclick="ST('setup')">① Configurar</div>
-    <div class="tab"        data-tab="progress" onclick="ST('progress')">② Progresso</div>
-    <div class="tab"        data-tab="log"      onclick="ST('log')">③ Log</div>
-    <div class="tab"        data-tab="diag"     onclick="ST('diag')">🔍 Diagnóstico</div>
-    <div class="tab"        data-tab="proxy"    onclick="ST('proxy')">⚙ Proxy</div>
+    <div class="tab active" data-tab="cfg"  onclick="ST('cfg')">① Configurar</div>
+    <div class="tab"        data-tab="prog" onclick="ST('prog')">② Progresso</div>
+    <div class="tab"        data-tab="log"  onclick="ST('log')">③ Log</div>
+    <div class="tab"        data-tab="prx"  onclick="ST('prx')">⚙ Proxy</div>
   </div>
   <div class="panels">
 
     <!-- ① CONFIGURAR -->
-    <div class="panel active" id="panel-setup">
-      <div class="pill"><div class="dot idle" id="dot"></div><div class="pill-txt idle" id="stTxt">Aguardando...</div></div>
+    <div class="panel active" id="panel-cfg">
+      <div class="pill"><div class="dot idle" id="dot"></div><div class="ptxt idle" id="stTxt">Aguardando...</div></div>
 
       <div class="card">
-        <div class="card-label">Terreno de referência</div>
+        <div class="card-lbl">Terreno de referência</div>
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.7;margin-bottom:10px">
           Clique em <strong style="color:var(--kv-blue)">🖱 Selecionar no mapa</strong> para escolher uma geometria existente.<br>
-          O app expande a BBOX + buffer e busca os dados do GeoSampa via proxy.
+          A BBOX é expandida pelo buffer e o pipeline inicia automaticamente.
         </div>
         <div class="brow">
           <button class="btn btn-p" style="flex:1" id="btnPick" onclick="pickAndRun()">🖱 Selecionar no mapa</button>
@@ -123,50 +120,66 @@
       </div>
 
       <div class="card">
-        <div class="card-label">Buffer</div>
-        <div class="slider-row">
+        <div class="card-lbl">Buffer</div>
+        <div class="srow">
           <input type="range" id="bufSlider" min="50" max="400" step="25" value="150" oninput="updBuf(this.value)">
           <div class="sv" id="bufVal">150 m</div>
         </div>
-        <div class="bbox-grid">
-          <div class="bbox-item"><label>OESTE</label><span id="bW">—</span></div>
-          <div class="bbox-item"><label>SUL</label><span id="bS">—</span></div>
-          <div class="bbox-item"><label>LESTE</label><span id="bE">—</span></div>
-          <div class="bbox-item"><label>NORTE</label><span id="bN">—</span></div>
+        <div class="bbox-g">
+          <div class="bbox-i"><label>OESTE</label><span id="bW">—</span></div>
+          <div class="bbox-i"><label>SUL</label><span id="bS">—</span></div>
+          <div class="bbox-i"><label>LESTE</label><span id="bE">—</span></div>
+          <div class="bbox-i"><label>NORTE</label><span id="bN">—</span></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-label">Layers criados no Giraffe</div>
+        <div class="card-lbl">Layers gerados no Giraffe</div>
         <div class="ll">
-          <div class="li"><div class="sw" style="background:#4a7c59"></div><div class="li-info"><div class="li-name">terreno_tin</div><div class="li-meta">TIN 3D · _baseElevation real por triângulo</div></div><div class="lb w" id="st-tin">–</div></div>
-          <div class="li"><div class="sw" style="background:#f5f0e8"></div><div class="li-info"><div class="li-name">quadra_viaria</div><div class="li-meta">quadra − calçada (sem sobreposição)</div></div><div class="lb w" id="st-quadra">–</div></div>
-          <div class="li"><div class="sw" style="background:#d4d4d4"></div><div class="li-info"><div class="li-name">calcadas_meio_fio</div><div class="li-meta">calçada carimbada no relevo</div></div><div class="lb w" id="st-calcada">–</div></div>
-          <div class="li"><div class="sw" style="background:#4a4a4a"></div><div class="li-info"><div class="li-name">ruas</div><div class="li-meta">terreno_tin − quadra − calçada</div></div><div class="lb w" id="st-rua">–</div></div>
-          <div class="li"><div class="sw" style="background:#a3e635"></div><div class="li-info"><div class="li-name">curvas_nivel</div><div class="li-meta">Linhas 3D com cota real [lng,lat,z]</div></div><div class="lb w" id="st-curvas">–</div></div>
+          <div class="li">
+            <div class="sw" style="background:#4a7c59"></div>
+            <div class="li-i"><div class="li-n">Topografia 3D (TIN)</div><div class="li-m">curvas_mestra + intermediaria → turf.tin() → updateGeoJSONLayerContents</div></div>
+            <div class="lb w" id="st-tin">–</div>
+          </div>
+          <div class="li">
+            <div class="sw" style="background:#f5f0e8"></div>
+            <div class="li-i"><div class="li-n">Quadra Viária</div><div class="li-m">quadra_viaria_editada − calçadas · createRawSections</div></div>
+            <div class="lb w" id="st-quadra">–</div>
+          </div>
+          <div class="li">
+            <div class="sw" style="background:#d4d4d4"></div>
+            <div class="li-i"><div class="li-n">Calçadas</div><div class="li-m">calcada · createRawSections</div></div>
+            <div class="lb w" id="st-calcada">–</div>
+          </div>
+          <div class="li">
+            <div class="sw" style="background:#4a4a4a"></div>
+            <div class="li-i"><div class="li-n">Ruas</div><div class="li-m">bbox − quadra − calçada · createRawSections</div></div>
+            <div class="lb w" id="st-rua">–</div>
+          </div>
         </div>
       </div>
 
       <div class="ib">
-        <strong>Lógica:</strong> TIN base (verde) ← curvas de nível interpoladas.<br>
-        Quadra = quadra_viaria − calçadas · Calçada = calçadas sobre o TIN.<br>
-        Rua = TIN − quadra − calçada · Cada camada = <strong>Drawing Layer separado</strong>.
+        <strong>Fonte:</strong> <code>cd_numero_isovalor</code> (int, metros) é o campo real de cota no GeoSampa.<br>
+        <strong>Fluxo TIN:</strong> curvas → <code>turf.explode()</code> → pontos com z_val → <code>turf.tin(pts,'z_val')</code> → malha.<br>
+        <strong>TIN:</strong> <code>updateGeoJSONLayerContents</code> (GeoJSON layer, não trava o Giraffe).<br>
+        <strong>Urbanas:</strong> <code>createRawSections</code> com <code>_baseElevation</code> por IDW.
       </div>
     </div>
 
     <!-- ② PROGRESSO -->
-    <div class="panel" id="panel-progress">
+    <div class="panel" id="panel-prog">
       <div id="pg-run" style="display:none">
-        <div class="ml" style="margin-bottom:6px">Progresso</div>
-        <div class="pw" style="margin-bottom:10px"><div class="pb" id="pBar" style="width:0%"></div></div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:6px">PROGRESSO</div>
+        <div class="pw"><div class="pb" id="pBar" style="width:0%"></div></div>
         <div class="sl" id="stepList"></div>
       </div>
       <div id="pg-done" style="display:none">
-        <div class="card"><div class="card-label">Resumo</div><div class="sg" id="statsGrid"></div></div>
-        <button class="btn btn-p" onclick="ST('setup')" style="margin-top:6px">← Voltar</button>
+        <div class="card"><div class="card-lbl">Resumo</div><div class="sg" id="statsGrid"></div></div>
+        <button class="btn btn-p" onclick="ST('cfg')" style="margin-top:6px">← Voltar</button>
       </div>
       <div id="pg-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:32px;text-align:center">
-        <div style="font-size:28px;opacity:.3">🌄</div>
+        <div style="font-size:28px;opacity:.3">🏔</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.5">Selecione o terreno na aba ①.</div>
       </div>
     </div>
@@ -174,50 +187,22 @@
     <!-- ③ LOG -->
     <div class="panel" id="panel-log">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <span class="ml" style="margin:0">Log</span>
-        <button class="btn btn-g btn-sm" onclick="clearLog()">limpar</button>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">LOG</span>
+        <button class="btn btn-g btn-sm" onclick="clrLog()">limpar</button>
       </div>
       <div class="lw" id="logWrap"><div class="le in"><span class="lt">--:--:--</span><span>Pronto.</span></div></div>
     </div>
 
-    <!-- 🔍 DIAGNÓSTICO -->
-    <div class="panel" id="panel-diag">
-      <div class="card">
-        <div class="card-label">Diagnóstico — campos das curvas de nível</div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.6;margin-bottom:10px">
-          Faz fetch de 3 feições da camada de curvas para inspecionar<br>
-          quais campos de cota o GeoSampa retorna no seu projeto.
-        </div>
-        <div class="brow" style="margin-bottom:10px">
-          <button class="btn btn-p" style="flex:1;font-size:11px" onclick="diagCurvas()">🔍 Inspecionar curvas_mestra</button>
-          <button class="btn btn-g btn-sm" onclick="diagInter()">Intermediária</button>
-        </div>
-        <div class="props-box" id="diagBox">Aguardando fetch...</div>
-      </div>
-      <div class="ib">
-        <strong>Use este resultado</strong> para confirmar o campo de cota.<br>
-        Se aparecer algo como <code>cota: 760</code> ou <code>COTA_Z: 760</code>, o app já detecta.<br>
-        Se estiver vazio ou ausente, informe o campo correto abaixo.
-      </div>
-      <div class="card">
-        <div class="card-label">Campo de cota customizado (opcional)</div>
-        <input type="text" class="pi" id="cotaField" placeholder="ex: cota_mestra, COTA_Z, elevacao..." style="margin-bottom:6px"/>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted)">
-          Deixe vazio para usar a detecção automática.
-        </div>
-      </div>
-    </div>
-
     <!-- ⚙ PROXY -->
-    <div class="panel" id="panel-proxy">
+    <div class="panel" id="panel-prx">
       <div class="card">
-        <div class="card-label">Cloudflare Worker — Proxy CORS</div>
+        <div class="card-lbl">Cloudflare Worker — Proxy CORS</div>
         <p style="font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.6;margin-bottom:10px">
-          O GeoSampa bloqueia chamadas diretas (CORS). Proxies públicos bloquearam
+          GeoSampa bloqueia chamadas diretas (CORS). Proxies públicos bloquearam
           <code style="color:var(--warn)">prefeitura.sp.gov.br</code>.<br>
-          Use o seu <strong style="color:var(--kv-blue)">Cloudflare Worker próprio</strong> (plano free, 100k req/dia).
+          Use o seu <strong style="color:var(--kv-blue)">Cloudflare Worker próprio</strong> (plano free · 100k req/dia).
         </p>
-        <div class="ml">URL do seu Worker</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:4px">URL do Worker</div>
         <input type="text" class="pi" id="proxyInp" placeholder="https://geosampa-proxy.seu-usuario.workers.dev" oninput="saveProxy(this.value)"/>
         <div class="ps" id="proxySt"></div>
         <div class="brow" style="margin-top:10px">
@@ -226,7 +211,7 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-label">worker.js</div>
+        <div class="card-lbl">worker.js</div>
         <div class="cb" id="wCode">addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
@@ -246,7 +231,7 @@ async function handleRequest(request) {
     }
   })
 }</div>
-        <button class="btn btn-g btn-sm" style="margin-top:8px;width:100%" onclick="copyW()">Copiar código</button>
+        <button class="btn btn-g btn-sm" style="margin-top:8px;width:100%" onclick="cpyW()">Copiar código</button>
       </div>
     </div>
 
@@ -256,575 +241,537 @@ async function handleRequest(request) {
 <script type="module">
 import { giraffeState, rpc } from 'https://esm.sh/@gi-nx/iframe-sdk@latest';
 
-// ─────────────────────────────────────────────────────────────────
-// PROXY
-// ─────────────────────────────────────────────────────────────────
-const WFS = 'https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/wfs';
-let proxy = '';
+// ─────────────────────────────────────────────────────────────────────
+// CONFIGURAÇÃO — altere aqui os layer names se necessário
+// ─────────────────────────────────────────────────────────────────────
+const LAYER_CURVA_MESTRA      = 'geoportal:curva_mestra';
+const LAYER_CURVA_INTER       = 'geoportal:curva_intermediaria';
+const LAYER_QUADRA            = 'geoportal:quadra_viaria_editada';
+const LAYER_CALCADA           = 'geoportal:calcada';
+const CAMPO_COTA              = 'cd_numero_isovalor'; // campo real no GeoSampa
+const WFS                     = 'https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/wfs';
 
+// ─────────────────────────────────────────────────────────────────────
+// PROXY
+// ─────────────────────────────────────────────────────────────────────
+let proxy = '';
 function loadProxy() {
   try { proxy = localStorage.getItem('geosampa_proxy') || ''; } catch(e) {}
   const el = document.getElementById('proxyInp'); if (el) el.value = proxy;
 }
-window.saveProxy = v => { proxy = v.trim(); try { localStorage.setItem('geosampa_proxy', proxy); } catch(e) {} };
+window.saveProxy  = v => { proxy = v.trim(); try { localStorage.setItem('geosampa_proxy', proxy); } catch(e) {} };
 window.clearProxy = () => { proxy = ''; document.getElementById('proxyInp').value = ''; try { localStorage.removeItem('geosampa_proxy'); } catch(e) {} showPS('',''); };
-window.testProxy = async () => {
+window.testProxy  = async () => {
   const u = document.getElementById('proxyInp').value.trim();
   if (!u) { showPS('fail','Insira uma URL primeiro.'); return; }
   showPS('test','Testando...');
   try {
     const res = await fetch(pu(WFS+'?service=WFS&version=1.1.0&request=GetCapabilities', u), {signal:AbortSignal.timeout(12000)});
-    if (res.ok) { proxy=u; window.saveProxy(u); showPS('ok',`✓ OK (HTTP ${res.status})`); log('ok',`Proxy OK: ${u}`); }
+    if (res.ok) { proxy=u; window.saveProxy(u); showPS('ok',`✓ OK (HTTP ${res.status})`); log('ok',`Proxy OK`); }
     else showPS('fail',`HTTP ${res.status}`);
   } catch(e) { showPS('fail',`Erro: ${e.message}`); }
 };
 function showPS(t,m){const el=document.getElementById('proxySt');if(!m){el.style.display='none';return;}el.style.display='block';el.className=`ps ${t}`;el.textContent=m;}
 function pu(url, base) { const b=(base||proxy).replace(/\/$/,''); return b?`${b}?url=${encodeURIComponent(url)}`:url; }
-window.copyW = () => { navigator.clipboard.writeText(document.getElementById('wCode').textContent).then(()=>{const b=event.target;b.textContent='✓ Copiado!';setTimeout(()=>b.textContent='Copiar código',1800);}); };
+window.cpyW = () => navigator.clipboard.writeText(document.getElementById('wCode').textContent)
+  .then(()=>{const b=event.target;b.textContent='✓ Copiado!';setTimeout(()=>b.textContent='Copiar código',1800);});
 
-// ─────────────────────────────────────────────────────────────────
-// WFS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// WFS — versão 1.1.0 com srsName=EPSG:4326
+// bbox format: minX,minY,maxX,maxY,EPSG:4326 (lon,lat order)
+// ─────────────────────────────────────────────────────────────────────
 async function fetchWFS(typeName, bbox, maxF=500, ms=40000) {
   const {minX,minY,maxX,maxY} = bbox;
-  const url = `${WFS}?${new URLSearchParams({service:'WFS',version:'1.1.0',request:'GetFeature',typeName,outputFormat:'application/json',maxFeatures:String(maxF),srsName:'EPSG:4326',bbox:`${minX},${minY},${maxX},${maxY},EPSG:4326`})}`;
+  const url = `${WFS}?${new URLSearchParams({
+    service:'WFS', version:'1.1.0', request:'GetFeature',
+    typeName, outputFormat:'application/json',
+    maxFeatures: String(maxF), srsName:'EPSG:4326',
+    bbox: `${minX},${minY},${maxX},${maxY},EPSG:4326`,
+  })}`;
   const res = await fetch(pu(url), {signal:AbortSignal.timeout(ms)});
   if (!res.ok) throw new Error(`HTTP ${res.status} — ${typeName}`);
   const json = await res.json();
   if (json.exceptions||json.ExceptionReport) throw new Error(`WFS exception — ${typeName}`);
-  return json;
+  return json; // GeoJSON FeatureCollection
 }
 
-// ─────────────────────────────────────────────────────────────────
-// DIAGNÓSTICO — inspecionar campos reais do GeoSampa
-// ─────────────────────────────────────────────────────────────────
-async function diagFetch(typeName) {
-  if (!proxy) { document.getElementById('diagBox').textContent='⚠ Configure o proxy primeiro.'; return; }
-  if (!baseBbox) { document.getElementById('diagBox').textContent='⚠ Selecione um terreno primeiro (aba ①).'; return; }
-  document.getElementById('diagBox').textContent = `Buscando ${typeName}...`;
-  try {
-    const bbox = expandBbox(baseBbox, bufM);
-    const fc = await fetchWFS(typeName, bbox, 3);
-    if (!fc.features?.length) { document.getElementById('diagBox').textContent = 'Nenhuma feição retornada no BBOX.'; return; }
-    const f = fc.features[0];
-    // Mostrar: tipo de geometria, total de features, coordenadas (primeiras 3), todas as propriedades
-    const coordSample = (f.geometry?.type === 'MultiLineString'
-      ? f.geometry.coordinates[0]
-      : f.geometry?.coordinates || []).slice(0,3);
-    const info = [
-      `=== ${typeName} ===`,
-      `Total no BBOX: ${fc.features.length} feições`,
-      `Tipo geométrico: ${f.geometry?.type}`,
-      ``,
-      `--- PROPRIEDADES DA 1ª FEIÇÃO ---`,
-      ...Object.entries(f.properties||{}).map(([k,v])=>`  ${k}: ${JSON.stringify(v)}`),
-      ``,
-      `--- COORDENADAS (primeiras 3) ---`,
-      ...coordSample.map(c=>`  [${c.join(', ')}]`),
-      ``,
-      `--- CAMPO COM COTA DETECTADO ---`,
-      `  → ${detectCotaField(f) ?? '❌ Nenhum campo de cota encontrado!'}`,
-    ].join('\n');
-    document.getElementById('diagBox').textContent = info;
-    log('ok', `Diagnóstico ${typeName}: campo cota = "${detectCotaField(f) ?? 'NÃO ENCONTRADO'}"`);
-  } catch(e) {
-    document.getElementById('diagBox').textContent = `Erro: ${e.message}`;
-  }
-}
-
-window.diagCurvas = () => diagFetch('geoportal:curva_mestra');
-window.diagInter  = () => diagFetch('geoportal:curva_intermediaria');
-
-// Retorna o nome do campo de cota e o valor encontrado, ou null
-function detectCotaField(feature) {
-  const p = feature.properties || {};
-  const customField = document.getElementById('cotaField')?.value?.trim();
-  if (customField && p[customField] !== undefined) return `${customField} = ${p[customField]}`;
-  // Detecção automática — lista exaustiva de nomes possíveis
-  const candidates = [
-    'cd_numero_isovalor',           // ← CAMPO REAL GeoSampa (SP)
-    'cota','COTA','cota_z','COTA_Z',
-    'cota_mestra','COTA_MESTRA','cota_intermediaria','COTA_INTERMEDIARIA',
-    'elevacao','ELEVACAO','altitude','ALTITUDE',
-    'z','Z','nivel','NIVEL','elev','ELEV',
-    'height','HEIGHT','alt','ALT','dem','DEM','mdt','MDT',
-  ];
-  for (const k of candidates) {
-    if (k in p) {
-      const v = parseFloat(p[k]);
-      if (!isNaN(v) && v > 0 && v < 5000) return `${k} = ${v}`;
-    }
-  }
-  return null;
-}
-
-// Extrai o valor numérico da cota, usando campo customizado se informado
-function extractCota(feature) {
-  const p = feature.properties || {};
-
-  // Campo customizado informado pelo usuário (aba Diagnóstico)
-  const customField = document.getElementById('cotaField')?.value?.trim();
-  if (customField) {
-    const v = parseFloat(p[customField]);
-    if (!isNaN(v) && v > 0 && v < 5000) return v;
-  }
-
-  // cd_numero_isovalor é o campo real do GeoSampa (confirmado via DescribeFeatureType)
-  // Contém o valor da isocota em metros inteiros (ex: 810 = 810m)
-  const candidates = [
-    'cd_numero_isovalor',           // ← CAMPO REAL GeoSampa (SP)
-    'cota','COTA','cota_z','COTA_Z',
-    'cota_mestra','COTA_MESTRA',
-    'cota_intermediaria','COTA_INTERMEDIARIA',
-    'elevacao','ELEVACAO','altitude','ALTITUDE',
-    'z','Z','nivel','NIVEL',
-    'elev','ELEV','height','HEIGHT',
-    'alt','ALT','dem','DEM','mdt','MDT',
-  ];
-  for (const k of candidates) {
-    if (k in p) {
-      const v = parseFloat(p[k]);
-      if (!isNaN(v) && v > 0 && v < 5000) return v;
-    }
-  }
-  // Fallback numérico: qualquer inteiro na faixa altimétrica de SP (600-1200m)
-  for (const v of Object.values(p)) {
-    if (typeof v === 'number' && v >= 600 && v <= 1200) return v;
-  }
-  return null;
-}
-
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // GEO HELPERS
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 const DLAT=1/111320, DLNG=1/(111320*Math.cos(23.5*Math.PI/180));
 function expandBbox(b,m){return{minX:b.minX-m*DLNG,minY:b.minY-m*DLAT,maxX:b.maxX+m*DLNG,maxY:b.maxY+m*DLAT};}
+function mergeBbox(a,b){if(!a)return b;return{minX:Math.min(a.minX,b.minX),minY:Math.min(a.minY,b.minY),maxX:Math.max(a.maxX,b.maxX),maxY:Math.max(a.maxY,b.maxY)};}
 function featureBbox(f){
-  const pts=[];function walk(a,d){if(d===0){pts.push(a);return;}for(const x of a)walk(x,d-1);}
+  const pts=[];
+  function walk(a,d){if(d===0){pts.push(a);return;}for(const x of a)walk(x,d-1);}
   const D={Point:0,LineString:1,Polygon:2,MultiPoint:1,MultiLineString:2,MultiPolygon:3};
   walk(f.geometry.coordinates,D[f.geometry.type]??2);
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
   for(const[x,y]of pts){if(x<x0)x0=x;if(y<y0)y0=y;if(x>x1)x1=x;if(y>y1)y1=y;}
   return{minX:x0,minY:y0,maxX:x1,maxY:y1};
 }
-function mergeBbox(a,b){if(!a)return b;return{minX:Math.min(a.minX,b.minX),minY:Math.min(a.minY,b.minY),maxX:Math.max(a.maxX,b.maxX),maxY:Math.max(a.maxY,b.maxY)};}
 
-// ─────────────────────────────────────────────────────────────────
-// IDW
-// ─────────────────────────────────────────────────────────────────
-function idw(px, py, pts, power=2, k=20) {
+// ─────────────────────────────────────────────────────────────────────
+// IDW — interpola Z num ponto dado nuvem de controle
+// ─────────────────────────────────────────────────────────────────────
+function idw(px, py, pts, power=2, k=16) {
   if (!pts.length) return 0;
-  const near = pts.map(p=>({z:p.z,d2:(p.x-px)**2+(p.y-py)**2})).sort((a,b)=>a.d2-b.d2).slice(0,k);
+  const near = pts
+    .map(p => ({z:p.z, d2:(p.x-px)**2+(p.y-py)**2}))
+    .sort((a,b) => a.d2-b.d2)
+    .slice(0, k);
   if (near[0].d2 < 1e-14) return near[0].z;
-  let ws=0,vs=0;
-  for(const p of near){const w=1/Math.pow(p.d2,power/2);ws+=w;vs+=w*p.z;}
-  return ws>0?vs/ws:0;
+  let ws=0, vs=0;
+  for (const p of near) { const w=1/Math.pow(p.d2,power/2); ws+=w; vs+=w*p.z; }
+  return ws>0 ? vs/ws : 0;
 }
 
-// ─────────────────────────────────────────────────────────────────
-// PROCESSAR CURVAS → pontos 3D + linhas 3D
-// ─────────────────────────────────────────────────────────────────
-function processCurvas(fc) {
-  const pts=[], lines3D=[];
-  let semCota=0, comCota=0;
-  for (const f of (fc.features||[])) {
-    const cota = extractCota(f);
-    if (cota===null) { semCota++; continue; }
+// ─────────────────────────────────────────────────────────────────────
+// PASSO 1 — Extrair pontos 3D das curvas de nível
+//
+// Campo real do GeoSampa: cd_numero_isovalor (int, metros)
+// Usa turf.explode() para quebrar as linhas em pontos individuais,
+// depois atribui z_val = cota da curva a cada ponto.
+// ─────────────────────────────────────────────────────────────────────
+function curvasToPoints(fc) {
+  const turfPts = [];  // para turf.tin()
+  const ctrlPts = [];  // para IDW das camadas urbanas
+
+  let comCota = 0, semCota = 0;
+
+  for (const feat of (fc.features || [])) {
+    // Lê a cota do campo oficial + fallbacks
+    const p = feat.properties || {};
+    let cota = null;
+    for (const k of [CAMPO_COTA, 'cota','COTA','elevacao','ELEVACAO','altitude','ALTITUDE','z','Z']) {
+      const v = parseFloat(p[k]);
+      if (!isNaN(v) && v > 0 && v < 5000) { cota = v; break; }
+    }
+    if (cota === null) { semCota++; continue; }
     comCota++;
-    const geom = f.geometry; if(!geom) continue;
-    const segs = geom.type==='MultiLineString'?geom.coordinates:[geom.coordinates];
-    for (const seg of segs) {
-      // Linha 3D: guarda _baseElevation com a cota real.
-      // Coordenadas são 2D [lng,lat] — o sanitize() e o Giraffe exigem isso.
-      const coords2D_line = seg.map(([lng,lat])=>[lng,lat]);
-      lines3D.push({
-        type:'Feature',
-        geometry:{type:'LineString',coordinates:coords2D_line},
-        properties:{cota, color:'#84cc16', stroke:'#84cc16', strokeWidth:1, _baseElevation:cota}
-      });
-      for(const[lng,lat] of seg) pts.push({x:lng,y:lat,z:cota});
+
+    // turf.explode quebra a LineString/MultiLineString em pontos individuais
+    let exploded;
+    try { exploded = turf.explode(feat); }
+    catch(e) { continue; }
+
+    for (const pt of (exploded.features || [])) {
+      const [lng, lat] = pt.geometry.coordinates;
+      // Adiciona z_val como propriedade — necessário para turf.tin(fc, 'z_val')
+      turfPts.push(turf.point([lng, lat], { z_val: cota }));
+      ctrlPts.push({ x: lng, y: lat, z: cota });
     }
   }
-  log(comCota>0?'ok':'er', `Curvas: ${comCota} com cota · ${semCota} sem cota`);
-  if (semCota > 0 && comCota === 0) log('er','❌ NENHUMA curva tem campo de cota detectado. Use 🔍 Diagnóstico para ver os campos reais.');
-  return {pts, lines3D};
+
+  log(comCota>0?'ok':'er',
+    `Curvas: ${comCota} com cota (campo: ${CAMPO_COTA}) · ${semCota} sem cota · ${ctrlPts.length} pontos explodidos`);
+
+  return { turfPts, ctrlPts };
 }
 
-// ─────────────────────────────────────────────────────────────────
-// TIN 3D
-// ─────────────────────────────────────────────────────────────────
-function buildTIN(pts, datum) {
-  if (pts.length < 3) return [];
-  let sample = pts;
-  if (pts.length > 600) { const st=Math.ceil(pts.length/600); sample=pts.filter((_,i)=>i%st===0); }
-  const seen=new Set();
-  const uniq=sample.filter(p=>{const k=`${p.x.toFixed(7)},${p.y.toFixed(7)}`;if(seen.has(k))return false;seen.add(k);return true;});
-  if (uniq.length<3) return [];
-  const fc=turf.featureCollection(uniq.map(p=>turf.point([p.x,p.y],{z:p.z})));
-  let tin; try{tin=turf.tin(fc,'z');}catch(e){log('wn',`turf.tin: ${e.message}`);return[];}
-  return tin.features.map(tri=>{
-    const ring=tri.geometry.coordinates[0];
-    const zv=ring.slice(0,3).map(([lng,lat])=>idw(lng,lat,uniq));
-    const zMean=Math.round((zv[0]+zv[1]+zv[2])/3*10)/10;
-    const zRel=Math.max(0, zMean-datum);
-    // createRawSections NAO aceita coords Z [lng,lat,z] em polígonos.
-    // Coordenadas devem ser 2D [lng,lat]. O Z vai SOMENTE em _baseElevation.
-    const coords2D=ring.map(([lng,lat])=>[lng,lat]);
-    return{type:'Feature',geometry:{type:'Polygon',coordinates:[coords2D]},
-      properties:{color:'#4a7c59',stroke:'#4a7c59',strokeWidth:0,_baseElevation:zRel,_height:0,_opacity:0.9}};
+// ─────────────────────────────────────────────────────────────────────
+// PASSO 2 — Gerar malha TIN com turf.tin()
+//
+// Entrada: array de turf.point() com propriedade z_val
+// Saída: FeatureCollection de Polygons com propriedade z_val = cota média
+// ─────────────────────────────────────────────────────────────────────
+function buildTIN(turfPts, datum) {
+  if (turfPts.length < 3) { log('wn','TIN: menos de 3 pontos, impossível triangular'); return null; }
+
+  // Limite de pontos para turf.tin (O(n²) — 800 pts é o máximo seguro)
+  let pts = turfPts;
+  if (pts.length > 800) {
+    const step = Math.ceil(pts.length / 800);
+    pts = pts.filter((_,i) => i % step === 0);
+    log('wn', `TIN: amostrado ${pts.length} de ${turfPts.length} pontos para performance`);
+  }
+
+  // Deduplica lat/lng (turf.tin quebra com pontos coincidentes)
+  const seen = new Set();
+  pts = pts.filter(p => {
+    const k = `${p.geometry.coordinates[0].toFixed(6)},${p.geometry.coordinates[1].toFixed(6)}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
   });
+
+  if (pts.length < 3) { log('er','TIN: pontos insuficientes após deduplicação'); return null; }
+
+  const fc = turf.featureCollection(pts);
+  let tin;
+  try {
+    tin = turf.tin(fc, 'z_val');
+  } catch(e) {
+    log('er', `turf.tin() falhou: ${e.message}`);
+    return null;
+  }
+
+  // Pós-processar: adicionar cor e baseElevation relativo ao datum
+  tin.features = tin.features.map(tri => {
+    const zVals = [
+      tri.properties.a,
+      tri.properties.b,
+      tri.properties.c,
+    ].filter(v => v != null && !isNaN(v));
+    const zMean = zVals.length
+      ? zVals.reduce((s,v)=>s+v,0) / zVals.length
+      : datum;
+    const zRel = Math.max(0, Math.round((zMean - datum) * 10) / 10);
+    return {
+      ...tri,
+      properties: {
+        ...tri.properties,
+        fill: '#4a7c59',
+        'fill-opacity': 0.85,
+        stroke: '#4a7c59',
+        'stroke-width': 0,
+        _baseElevation: zRel,
+      }
+    };
+  });
+
+  return tin; // FeatureCollection — pronto para updateGeoJSONLayerContents
 }
 
-// ─────────────────────────────────────────────────────────────────
-// STAMP — atribui _baseElevation IDW a cada polígono
-// ─────────────────────────────────────────────────────────────────
-function stampFeats(fc, pts, datum, color, stroke) {
-  const out=[];
-  for(const f of (fc.features||[])){
-    const geom=f.geometry; if(!geom) continue;
-    const polys=geom.type==='Polygon'?[geom.coordinates]:geom.type==='MultiPolygon'?geom.coordinates:[];
-    for(const rings of polys){
-      const ring=rings[0];
-      const cx=ring.reduce((s,p)=>s+p[0],0)/ring.length;
-      const cy=ring.reduce((s,p)=>s+p[1],0)/ring.length;
-      const z=Math.max(0,Math.round((idw(cx,cy,pts)-datum)*10)/10);
-      out.push({type:'Feature',geometry:{type:'Polygon',coordinates:rings},
-        properties:{color,stroke,strokeWidth:1,_baseElevation:z,_height:0,_opacity:1}});
+// ─────────────────────────────────────────────────────────────────────
+// PASSO 3 — Stampar camadas urbanas no perfil (IDW)
+//
+// Retorna features com _baseElevation relativo ao datum.
+// Coordenadas são 2D (createRawSections não aceita Z nas coords).
+// ─────────────────────────────────────────────────────────────────────
+function stampLayer(fc, ctrlPts, datum, color, stroke) {
+  const out = [];
+  for (const f of (fc.features || [])) {
+    const geom = f.geometry; if (!geom) continue;
+    const polys = geom.type==='Polygon'      ? [geom.coordinates]
+                : geom.type==='MultiPolygon' ? geom.coordinates : [];
+    for (const rings of polys) {
+      if (!rings?.[0]?.length) continue;
+      const ring = rings[0];
+      const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
+      const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
+      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
+      // Força coordenadas 2D
+      const rings2D = rings.map(r => r.map(([x,y])=>[x,y]));
+      out.push({
+        type:'Feature',
+        geometry: {type:'Polygon', coordinates: rings2D},
+        properties: { color, stroke, strokeWidth:1, _baseElevation:z, _height:0, _opacity:1 }
+      });
     }
   }
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────────
-// SUBTRAÇÃO — usa turf.difference iterativo
-// ─────────────────────────────────────────────────────────────────
-// Subtrai lista de features de um polígono base.
-// Retorna o resultado como array de Features.
+// ─────────────────────────────────────────────────────────────────────
+// PASSO 4 — Subtração geométrica com turf.difference()
+//
+// subtractAll: remove todos os features de subtractFC de baseFeat
+// ─────────────────────────────────────────────────────────────────────
 function subtractAll(baseFeat, subtractFC) {
   let remaining = baseFeat;
-  for (const f of (subtractFC.features||[])) {
+  for (const f of (subtractFC.features || [])) {
     if (!remaining || !f.geometry) continue;
-    // Normaliza para Polygon (turf.difference não aceita MultiPolygon como subtrator)
-    const geoms = f.geometry.type==='MultiPolygon'
-      ? f.geometry.coordinates.map(c=>({type:'Feature',geometry:{type:'Polygon',coordinates:c},properties:{}}))
-      : [{type:'Feature',geometry:f.geometry,properties:{}}];
-    for (const g of geoms) {
+    const subs = f.geometry.type==='MultiPolygon'
+      ? f.geometry.coordinates.map(c=>turf.polygon(c))
+      : [turf.feature(f.geometry)];
+    for (const s of subs) {
       if (!remaining) break;
-      try { const d=turf.difference(remaining,g); if(d) remaining=d; } catch(e) {}
+      try { const d = turf.difference(remaining, s); if (d) remaining = d; } catch(e) {}
     }
   }
   if (!remaining) return [];
-  // Normaliza para array de polígonos simples
-  if (remaining.geometry.type==='Polygon')
-    return [remaining];
-  if (remaining.geometry.type==='MultiPolygon')
-    return remaining.geometry.coordinates.map(c=>({
-      type:'Feature',geometry:{type:'Polygon',coordinates:c},properties:{...remaining.properties}
-    }));
-  return [];
+  const g = remaining.geometry;
+  return g.type==='Polygon'      ? [remaining]
+       : g.type==='MultiPolygon' ? g.coordinates.map(c=>({type:'Feature',geometry:{type:'Polygon',coordinates:c},properties:{}}))
+       : [];
 }
 
-// ─────────────────────────────────────────────────────────────────
-// INJETAR EM DRAWING LAYER SEPARADO
-// Sequência garantida: createDrawingLayer → activateDrawingLayer → createRawSections
-// ─────────────────────────────────────────────────────────────────
-// Sanitiza features antes de enviar ao createRawSections:
-// - Remove coordenadas Z (3º elemento) — Giraffe só aceita 2D em polígonos
-// - Remove polígonos com anéis inválidos (< 4 pontos)
-// - Explode MultiPolygon em Polygon simples
-function sanitize(features) {
-  const out = [];
-  for (const f of features) {
-    if (!f?.geometry) continue;
-    const props = {
+// ─────────────────────────────────────────────────────────────────────
+// PASSO 5 — Injetar urbanas como Drawing Layer separado
+//
+// createDrawingLayer → activateDrawingLayer → createRawSections
+// ─────────────────────────────────────────────────────────────────────
+async function injectDrawingLayer(features, layerName) {
+  if (!features?.length) return 0;
+  // Sanitiza: garante props mínimas e coords 2D
+  const clean = features.map(f => ({
+    type:'Feature',
+    geometry: f.geometry,
+    properties: {
       color:          f.properties?.color         || '#888888',
       stroke:         f.properties?.stroke        || '#888888',
       strokeWidth:    f.properties?.strokeWidth   ?? 0,
       _baseElevation: f.properties?._baseElevation ?? 0,
       _height:        0,
       _opacity:       f.properties?._opacity      ?? 1,
-    };
-    // Normaliza coords para 2D
-    function to2D(ring) { return ring.map(c=>[c[0],c[1]]); }
-    function validRing(ring) { return Array.isArray(ring) && ring.length >= 4; }
-    function pushPoly(coordinates) {
-      // coordinates = [ outerRing, ...holes ]
-      if (!coordinates?.length) return;
-      const outer = to2D(coordinates[0]);
-      if (!validRing(outer)) return;
-      const holes = (coordinates.slice(1)||[])
-        .map(h=>to2D(h)).filter(h=>validRing(h));
-      out.push({ type:'Feature', geometry:{ type:'Polygon', coordinates:[outer,...holes] }, properties:props });
     }
-    const g = f.geometry;
-    if (g.type === 'Polygon')
-      pushPoly(g.coordinates);
-    else if (g.type === 'MultiPolygon')
-      for (const coords of g.coordinates) pushPoly(coords);
-    else if (g.type === 'LineString') {
-      // Linhas 3D: remove Z das coords
-      const coords2D = g.coordinates.map(c=>[c[0],c[1]]);
-      if (coords2D.length >= 2)
-        out.push({ type:'Feature', geometry:{ type:'LineString', coordinates:coords2D }, properties:props });
-    } else if (g.type === 'MultiLineString') {
-      for (const seg of g.coordinates) {
-        const c2 = seg.map(c=>[c[0],c[1]]);
-        if (c2.length >= 2)
-          out.push({ type:'Feature', geometry:{ type:'LineString', coordinates:c2 }, properties:props });
-      }
-    }
-  }
-  return out;
-}
+  })).filter(f => {
+    // Remove polígonos inválidos (menos de 4 pontos no anel externo)
+    const coords = f.geometry?.coordinates;
+    return coords && coords[0] && coords[0].length >= 4;
+  });
 
-async function injectToLayer(features, layerName) {
-  if (!features?.length) return 0;
-  const clean = sanitize(features);
-  if (!clean.length) { log('wn',`${layerName}: 0 features válidas após sanitização`); return 0; }
-  // Cria a layer (ok se já existir)
-  try { await rpc.invoke('createDrawingLayer',[layerName]); } catch(e) {}
-  // Ativa como destino das novas features
-  await rpc.invoke('activateDrawingLayer',[layerName]);
-  // Injeta em lotes de 200
-  let total=0;
-  for(let i=0;i<clean.length;i+=200){
-    await rpc.invoke('createRawSections',[clean.slice(i,i+200)]);
-    total+=Math.min(200,clean.length-i);
+  if (!clean.length) { log('wn',`${layerName}: 0 features válidas`); return 0; }
+
+  try { await rpc.invoke('createDrawingLayer', [layerName]); } catch(e) { /* já existe */ }
+  await rpc.invoke('activateDrawingLayer', [layerName]);
+
+  const BATCH = 150;
+  let total = 0;
+  for (let i = 0; i < clean.length; i += BATCH) {
+    await rpc.invoke('createRawSections', [clean.slice(i, i+BATCH)]);
+    total += Math.min(BATCH, clean.length-i);
   }
   return total;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // ESTADO
-// ─────────────────────────────────────────────────────────────────
-let baseBbox=null, bufM=150, busy=false;
+// ─────────────────────────────────────────────────────────────────────
+let baseBbox = null, bufM = 150, busy = false;
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // UI
-// ─────────────────────────────────────────────────────────────────
-window.ST=id=>{document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===`panel-${id}`));};
-window.updBuf=v=>{bufM=parseInt(v);document.getElementById('bufVal').textContent=`${v} m`;if(baseBbox)showBbox();};
-window.clearLog=()=>{document.getElementById('logWrap').innerHTML='';};
-function setStatus(cls,msg){document.getElementById('dot').className=`dot ${cls}`;const t=document.getElementById('stTxt');t.className=`pill-txt ${cls}`;t.textContent=msg;}
-function log(type,msg){const w=document.getElementById('logWrap');const e=document.createElement('div');e.className=`le ${type}`;e.innerHTML=`<span class="lt">${new Date().toLocaleTimeString('pt-BR')}</span><span>${msg}</span>`;w.prepend(e);while(w.children.length>200)w.removeChild(w.lastChild);}
-function badge(id,txt,cls){const el=document.getElementById(`st-${id}`);if(el){el.textContent=txt;el.className=`lb ${cls}`;}}
-function showBbox(){const b=expandBbox(baseBbox,bufM);document.getElementById('bW').textContent=b.minX.toFixed(6);document.getElementById('bS').textContent=b.minY.toFixed(6);document.getElementById('bE').textContent=b.maxX.toFixed(6);document.getElementById('bN').textContent=b.maxY.toFixed(6);}
-
-function initProgress(steps){
-  document.getElementById('pg-empty').style.display='none';document.getElementById('pg-done').style.display='none';document.getElementById('pg-run').style.display='block';document.getElementById('pBar').style.width='0%';
-  const el=document.getElementById('stepList');el.innerHTML='';
-  for(const s of steps){const row=document.createElement('div');row.className='si';row.innerHTML=`<span class="si-name">${s.label}</span><span class="si-st p" id="sp-${s.key}">aguardando</span>`;el.appendChild(row);}
+// ─────────────────────────────────────────────────────────────────────
+window.ST     = id => { document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id)); document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===`panel-${id}`)); };
+window.updBuf = v  => { bufM=parseInt(v); document.getElementById('bufVal').textContent=`${v} m`; if(baseBbox)showBbox(); };
+window.clrLog = ()  => { document.getElementById('logWrap').innerHTML=''; };
+function setSt(cls,msg) { document.getElementById('dot').className=`dot ${cls}`; const t=document.getElementById('stTxt'); t.className=`ptxt ${cls}`; t.textContent=msg; }
+function log(type,msg) { const w=document.getElementById('logWrap'); const e=document.createElement('div'); e.className=`le ${type}`; e.innerHTML=`<span class="lt">${new Date().toLocaleTimeString('pt-BR')}</span><span>${msg}</span>`; w.prepend(e); while(w.children.length>300)w.removeChild(w.lastChild); }
+function badge(id,txt,cls) { const el=document.getElementById(`st-${id}`); if(el){el.textContent=txt;el.className=`lb ${cls}`;} }
+function showBbox() { const b=expandBbox(baseBbox,bufM); document.getElementById('bW').textContent=b.minX.toFixed(6); document.getElementById('bS').textContent=b.minY.toFixed(6); document.getElementById('bE').textContent=b.maxX.toFixed(6); document.getElementById('bN').textContent=b.maxY.toFixed(6); }
+function pct(p) { document.getElementById('pBar').style.width=`${p}%`; }
+function step(key,cls,msg) { const el=document.getElementById(`sp-${key}`); if(el){el.className=`si-s ${cls}`;el.textContent=msg;} }
+function initProg(steps) {
+  document.getElementById('pg-empty').style.display='none';
+  document.getElementById('pg-done').style.display='none';
+  document.getElementById('pg-run').style.display='block';
+  pct(0);
+  const el=document.getElementById('stepList'); el.innerHTML='';
+  for(const s of steps){const r=document.createElement('div');r.className='si';r.innerHTML=`<span class="si-n">${s.label}</span><span class="si-s p" id="sp-${s.key}">aguardando</span>`;el.appendChild(r);}
 }
-function step(key,cls,msg){const el=document.getElementById(`sp-${key}`);if(el){el.className=`si-st ${cls}`;el.textContent=msg;}}
-function pct(p){document.getElementById('pBar').style.width=`${p}%`;}
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // ENTRADA
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 window.pickAndRun = async () => {
-  if(busy)return;
-  if(!proxy){setStatus('err','⚠ Configure o Proxy primeiro.');window.ST('proxy');return;}
-  setStatus('run','Clique em uma geometria no mapa...');
+  if (busy) return;
+  if (!proxy) { setSt('err','⚠ Configure o Proxy primeiro.'); window.ST('prx'); return; }
+  setSt('run','Clique em uma geometria no mapa...');
   try {
-    const secs=await rpc.invoke('pickRawSections',[]);
-    if(!secs?.length){setStatus('idle','Nenhuma geometria selecionada.');return;}
-    let bbox=null;for(const f of secs)if(f.geometry)bbox=mergeBbox(bbox,featureBbox(f));
-    if(!bbox){setStatus('err','Geometria sem coordenadas.');return;}
-    baseBbox=bbox;showBbox();
-    log('ok',`Terreno: ${secs.length} feição(ões)`);
+    const secs = await rpc.invoke('pickRawSections', []);
+    if (!secs?.length) { setSt('idle','Nenhuma geometria selecionada.'); return; }
+    let bbox=null;
+    for(const f of secs) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f));
+    if(!bbox){setSt('err','Geometria sem coordenadas.');return;}
+    baseBbox=bbox; showBbox();
+    log('ok',`Terreno: ${secs.length} feição(ões) selecionada(s)`);
     await pipeline();
-  } catch(e){setStatus('err',e.message);log('er',`pickRawSections: ${e.message}`);}
+  } catch(e) { setSt('err',e.message); log('er',`pickRawSections: ${e.message}`); }
 };
 
 window.runFromSel = async () => {
-  if(busy)return;
-  if(!proxy){setStatus('err','⚠ Configure o Proxy primeiro.');window.ST('proxy');return;}
+  if (busy) return;
+  if (!proxy) { setSt('err','⚠ Configure o Proxy primeiro.'); window.ST('prx'); return; }
   let bbox=null;
-  try{const s=await rpc.invoke('getSelectedFeatures',[]);if(s?.length)for(const f of s)if(f.geometry)bbox=mergeBbox(bbox,featureBbox(f));}catch(e){}
-  if(!bbox){try{const r=giraffeState.get('rawSections');if(r?.features?.length)for(const f of r.features)if(f.geometry)bbox=mergeBbox(bbox,featureBbox(f));}catch(e){}}
-  if(!bbox){setStatus('err','Nenhuma seleção. Use 🖱 Selecionar no mapa.');return;}
-  baseBbox=bbox;showBbox();await pipeline();
+  try { const s=await rpc.invoke('getSelectedFeatures',[]); if(s?.length) for(const f of s) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f)); } catch(e) {}
+  if (!bbox) { try { const r=giraffeState.get('rawSections'); if(r?.features?.length) for(const f of r.features) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f)); } catch(e) {} }
+  if (!bbox) { setSt('err','Nenhuma seleção. Use 🖱 Selecionar no mapa.'); return; }
+  baseBbox=bbox; showBbox();
+  await pipeline();
 };
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // PIPELINE
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 async function pipeline() {
-  busy=true;
+  busy = true;
   document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
-  window.ST('progress');
-  ['tin','quadra','calcada','rua','curvas'].forEach(k=>badge(k,'…','w'));
+  window.ST('prog');
+  ['tin','quadra','calcada','rua'].forEach(k=>badge(k,'…','w'));
 
-  initProgress([
-    {key:'wfs_curvas',  label:'① Buscar curvas de nível'},
-    {key:'build_tin',   label:'② Gerar TIN 3D (Turf.js)'},
-    {key:'wfs_urbanas', label:'③ Buscar quadra + calçada'},
-    {key:'geom_ops',    label:'④ Subtrações geométricas'},
-    {key:'inj_tin',     label:'⑤ Layer → terreno_tin'},
-    {key:'inj_quadra',  label:'⑥ Layer → quadra_viaria'},
-    {key:'inj_calcada', label:'⑦ Layer → calcadas_meio_fio'},
-    {key:'inj_rua',     label:'⑧ Layer → ruas'},
-    {key:'inj_curvas',  label:'⑨ Layer → curvas_nivel'},
+  initProg([
+    {key:'dl_curvas',   label:'① Baixando Curvas de Nível...'},
+    {key:'calc_tin',    label:'② Calculando Malha TIN (Turf.js)...'},
+    {key:'dl_urbanas',  label:'③ Baixando Camadas Urbanas...'},
+    {key:'calc_ruas',   label:'④ Calculando Ruas (subtração)...'},
+    {key:'inj_tin',     label:'⑤ Injetando Topografia 3D...'},
+    {key:'inj_quadra',  label:'⑥ Injetando Quadra Viária...'},
+    {key:'inj_calcada', label:'⑦ Injetando Calçadas...'},
+    {key:'inj_rua',     label:'⑧ Injetando Ruas...'},
   ]);
 
-  const bbox=expandBbox(baseBbox,bufM);
-  const stats={};
+  const bbox  = expandBbox(baseBbox, bufM);
+  const stats = {};
 
   try {
-    // ── ① CURVAS ──────────────────────────────────────────────────
-    setStatus('run','Buscando curvas de nível...');
-    step('wfs_curvas','r','buscando...');
+    // ── ① BAIXANDO CURVAS ─────────────────────────────────────────
+    setSt('run','① Baixando Curvas de Nível...');
+    step('dl_curvas','r','baixando...');
 
-    let mestraFC={type:'FeatureCollection',features:[]};
-    let interFC ={type:'FeatureCollection',features:[]};
-    try{mestraFC=await fetchWFS('geoportal:curva_mestra',bbox,500,45000);
-      log('ok',`Curva Mestra: ${mestraFC.features.length} feições`);}catch(e){log('er',`Curva Mestra: ${e.message}`);}
-    try{interFC=await fetchWFS('geoportal:curva_intermediaria',bbox,600,45000);
-      log('ok',`Curva Intermediária: ${interFC.features.length} feições`);}catch(e){log('er',`Curva Intermediária: ${e.message}`);}
+    let mestraFC = {type:'FeatureCollection',features:[]};
+    let interFC  = {type:'FeatureCollection',features:[]};
+    try { mestraFC = await fetchWFS(LAYER_CURVA_MESTRA, bbox, 500, 45000); log('ok',`Curva Mestra: ${mestraFC.features.length} feições`); }
+    catch(e) { log('er',`Curva Mestra: ${e.message}`); }
+    try { interFC  = await fetchWFS(LAYER_CURVA_INTER,  bbox, 600, 45000); log('ok',`Curva Intermediária: ${interFC.features.length} feições`); }
+    catch(e) { log('er',`Curva Intermediária: ${e.message}`); }
 
-    const allFC={type:'FeatureCollection',features:[...mestraFC.features,...interFC.features]};
-    step('wfs_curvas','d',`✓ ${allFC.features.length}`);
-    stats['Curvas total']=allFC.features.length;
+    const allCurvas = {type:'FeatureCollection', features:[...mestraFC.features,...interFC.features]};
+    stats['Curvas'] = allCurvas.features.length;
+    step('dl_curvas','d',`✓ ${allCurvas.features.length}`);
     pct(12);
 
-    if(!allFC.features.length) throw new Error('Nenhuma curva de nível. Verifique proxy e buffer.');
+    if (!allCurvas.features.length) throw new Error('Nenhuma curva de nível no BBOX. Verifique proxy e buffer.');
 
-    // ── ② TIN ─────────────────────────────────────────────────────
-    setStatus('run','Gerando TIN 3D...');
-    step('build_tin','r','processando...');
+    // ── ② CALCULANDO MALHA TIN ────────────────────────────────────
+    setSt('run','② Calculando Malha TIN (Turf.js)...');
+    step('calc_tin','r','explodindo + triangulando...');
 
-    const {pts,lines3D}=processCurvas(allFC);
-    stats['Pontos com cota']=pts.length;
+    const { turfPts, ctrlPts } = curvasToPoints(allCurvas);
+    stats['Pontos explodidos'] = ctrlPts.length;
 
-    if(!pts.length) throw new Error('Nenhum ponto com cota. Vá em 🔍 Diagnóstico para ver os campos das curvas.');
+    if (!ctrlPts.length) throw new Error(`Nenhum ponto com cota. Campo "${CAMPO_COTA}" não encontrado nas features.`);
 
-    const elevs=pts.map(p=>p.z);
-    const datum=Math.min(...elevs), eMax=Math.max(...elevs);
-    stats['Cota mín (m)']=datum.toFixed(1);
-    stats['Cota máx (m)']=eMax.toFixed(1);
-    stats['Desnível (m)']=(eMax-datum).toFixed(1);
-    log('ok',`Cotas: ${datum.toFixed(1)} – ${eMax.toFixed(1)} m · desnível ${(eMax-datum).toFixed(1)} m`);
+    const elevs  = ctrlPts.map(p=>p.z);
+    const datum  = Math.min(...elevs);
+    const eMax   = Math.max(...elevs);
+    stats['Cota mín (m)'] = datum.toFixed(0);
+    stats['Cota máx (m)'] = eMax.toFixed(0);
+    stats['Desnível (m)'] = (eMax-datum).toFixed(0);
+    log('ok',`Cotas: ${datum.toFixed(0)} – ${eMax.toFixed(0)} m · desnível ${(eMax-datum).toFixed(0)} m`);
 
-    const tinFeats=buildTIN(pts,datum);
-    stats['Triângulos TIN']=tinFeats.length;
-    badge('tin',String(tinFeats.length),tinFeats.length>0?'ok':'err');
-    step('build_tin','d',`✓ ${tinFeats.length}`);
-    pct(28);
+    const tinFC = buildTIN(turfPts, datum);
+    const tinCount = tinFC?.features?.length ?? 0;
+    stats['Triângulos TIN'] = tinCount;
+    badge('tin', String(tinCount), tinCount>0?'ok':'err');
+    step('calc_tin','d',`✓ ${tinCount} triângulos`);
+    pct(30);
 
-    // ── ③ CAMADAS URBANAS ─────────────────────────────────────────
-    setStatus('run','Buscando camadas urbanas...');
-    step('wfs_urbanas','r','buscando...');
+    // ── ③ BAIXANDO CAMADAS URBANAS ────────────────────────────────
+    setSt('run','③ Baixando Camadas Urbanas...');
+    step('dl_urbanas','r','baixando...');
 
-    let quadraFC={type:'FeatureCollection',features:[]};
-    let calcadaFC={type:'FeatureCollection',features:[]};
-    try{quadraFC=await fetchWFS('geoportal:quadra_viaria_editada',bbox,300);
-      log('ok',`Quadra: ${quadraFC.features.length}`);stats['Quadras']=quadraFC.features.length;}catch(e){log('er',`Quadra: ${e.message}`);}
-    try{calcadaFC=await fetchWFS('geoportal:calcada',bbox,500);
-      log('ok',`Calçada: ${calcadaFC.features.length}`);stats['Calçadas']=calcadaFC.features.length;}catch(e){log('er',`Calçada: ${e.message}`);}
-    step('wfs_urbanas','d','✓');
-    pct(45);
+    let quadraFC  = {type:'FeatureCollection',features:[]};
+    let calcadaFC = {type:'FeatureCollection',features:[]};
+    try { quadraFC  = await fetchWFS(LAYER_QUADRA,  bbox, 300); badge('quadra', String(quadraFC.features.length), quadraFC.features.length>0?'ok':'err'); log('ok',`Quadra: ${quadraFC.features.length}`); stats['Quadras']=quadraFC.features.length; }
+    catch(e) { log('er',`Quadra: ${e.message}`); badge('quadra','err','err'); }
+    try { calcadaFC = await fetchWFS(LAYER_CALCADA,  bbox, 500); badge('calcada', String(calcadaFC.features.length), calcadaFC.features.length>0?'ok':'err'); log('ok',`Calçada: ${calcadaFC.features.length}`); stats['Calçadas']=calcadaFC.features.length; }
+    catch(e) { log('er',`Calçada: ${e.message}`); badge('calcada','err','err'); }
 
-    // ── ④ SUBTRAÇÕES GEOMÉTRICAS ──────────────────────────────────
-    // Lógica:
-    //   calcadas_final  = calçadas (sem modificação)
-    //   quadra_final    = quadra − calçadas  (remove sobreposição)
-    //   rua_final       = bbox_poly − quadra − calçadas
-    setStatus('run','Calculando geometrias...');
-    step('geom_ops','r','subtraindo...');
+    step('dl_urbanas','d','✓');
+    pct(48);
 
-    // Calçadas: apenas stamp de elevação, sem subtração
-    const calcadaFeats = stampFeats(calcadaFC, pts, datum, '#d4d4d4','#b0b0b0');
+    // ── ④ CALCULANDO RUAS ─────────────────────────────────────────
+    // ruas = bbox − quadra − calçada
+    setSt('run','④ Calculando Ruas...');
+    step('calc_ruas','r','subtraindo...');
 
-    // Quadra − calçadas: remove a área de sobreposição
+    const bboxFeat = turf.bboxPolygon([bbox.minX, bbox.minY, bbox.maxX, bbox.maxY]);
+    const allUrban = {type:'FeatureCollection', features:[...quadraFC.features,...calcadaFC.features]};
+    const ruaGeoms = subtractAll(bboxFeat, allUrban);
+
+    // Stampar elevação IDW nas ruas
+    const ruaFeats = ruaGeoms.map(g => {
+      const ring = g.geometry.coordinates[0];
+      const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
+      const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
+      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
+      return {type:'Feature', geometry:g.geometry,
+        properties:{color:'#4a4a4a',stroke:'#333',strokeWidth:0,_baseElevation:z,_height:0,_opacity:1}};
+    });
+    badge('rua', String(ruaFeats.length), ruaFeats.length>0?'ok':'w');
+    stats['Ruas'] = ruaFeats.length;
+    log('ok',`Ruas: ${ruaFeats.length} polígonos (bbox − quadra − calçada)`);
+    step('calc_ruas','d',`✓ ${ruaFeats.length}`);
+    pct(60);
+
+    // ── ⑤ INJETANDO TOPOGRAFIA TIN ───────────────────────────────
+    // updateGeoJSONLayerContents — NÃO usa createRawSections para o TIN
+    // (injeta como GeoJSON layer estático, não trava o Giraffe)
+    setSt('run','⑤ Injetando Topografia 3D...');
+    step('inj_tin','r','injetando...');
+    if (tinFC && tinCount > 0) {
+      try {
+        await rpc.invoke('updateGeoJSONLayerContents', ['Topografia 3D (GeoSampa)', tinFC]);
+        log('ok',`Topografia 3D: ${tinCount} triângulos → GeoJSON layer`);
+        step('inj_tin','d',`✓ ${tinCount}`);
+      } catch(e) { step('inj_tin','f','✗'); log('er',`TIN inject: ${e.message}`); }
+    } else {
+      step('inj_tin','d','0 (sem curvas suficientes)');
+    }
+    pct(70);
+
+    // ── ⑥ INJETANDO QUADRA − CALÇADA ─────────────────────────────
+    setSt('run','⑥ Injetando Quadra Viária...');
+    step('inj_quadra','r','calculando quadra − calçada...');
+
+    // quadra_viaria = cada quadra com as calçadas subtraídas
     const quadraFinal = [];
     for (const qf of (quadraFC.features||[])) {
       if (!qf.geometry) continue;
-      const qFeature = {type:'Feature',geometry:qf.geometry,properties:{}};
-      const qGeoms = subtractAll(qFeature, calcadaFC);
-      for (const g of qGeoms) {
-        const ring=g.geometry.coordinates[0];
-        const cx=ring.reduce((s,p)=>s+p[0],0)/ring.length;
-        const cy=ring.reduce((s,p)=>s+p[1],0)/ring.length;
-        const z=Math.max(0,Math.round((idw(cx,cy,pts)-datum)*10)/10);
+      const subtracted = subtractAll(turf.feature(qf.geometry), calcadaFC);
+      for (const g of subtracted) {
+        const ring = g.geometry.coordinates[0];
+        const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
+        const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
+        const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
         quadraFinal.push({type:'Feature',geometry:g.geometry,
           properties:{color:'#f5f0e8',stroke:'#d4c9a8',strokeWidth:1,_baseElevation:z,_height:0,_opacity:1}});
       }
     }
 
-    // Rua = bbox − todas as quadras − todas as calçadas
-    const bboxFeat = turf.bboxPolygon([bbox.minX,bbox.minY,bbox.maxX,bbox.maxY]);
-    const allUrbanFC = {type:'FeatureCollection',features:[...quadraFC.features,...calcadaFC.features]};
-    const ruaGeoms = subtractAll(bboxFeat, allUrbanFC);
-    const ruaFinal = ruaGeoms.map(g=>{
-      const ring=g.geometry.coordinates[0];
-      const cx=ring.reduce((s,p)=>s+p[0],0)/ring.length;
-      const cy=ring.reduce((s,p)=>s+p[1],0)/ring.length;
-      const z=Math.max(0,Math.round((idw(cx,cy,pts)-datum)*10)/10);
-      return{type:'Feature',geometry:g.geometry,
-        properties:{color:'#4a4a4a',stroke:'#333',strokeWidth:0,_baseElevation:z,_height:0,_opacity:1}};
-    });
+    try {
+      const n = await injectDrawingLayer(quadraFinal, 'quadra_viaria');
+      step('inj_quadra','d',`✓ ${n}`); log('ok',`quadra_viaria: ${n}`);
+    } catch(e) { step('inj_quadra','f','✗'); log('er',`quadra_viaria: ${e.message}`); }
+    pct(80);
 
-    badge('quadra',String(quadraFinal.length),quadraFinal.length>0?'ok':'w');
-    badge('calcada',String(calcadaFeats.length),calcadaFeats.length>0?'ok':'w');
-    badge('rua',String(ruaFinal.length),ruaFinal.length>0?'ok':'w');
-    stats['Quadra (após subtração)']=quadraFinal.length;
-    stats['Ruas']=ruaFinal.length;
-    log('ok',`Quadra: ${quadraFinal.length} polígonos · Calçada: ${calcadaFeats.length} · Rua: ${ruaFinal.length}`);
-    step('geom_ops','d','✓');
-    pct(58);
-
-    // ── ⑤–⑨ INJETAR ───────────────────────────────────────────────
-    setStatus('run','Injetando layers...');
-
-    step('inj_tin','r','injetando...');
-    try{const n=await injectToLayer(tinFeats,'terreno_tin');step('inj_tin','d',`✓ ${n}`);log('ok',`terreno_tin: ${n}`);}
-    catch(e){step('inj_tin','f','✗');log('er',`terreno_tin: ${e.message}`);}
-    pct(66);
-
-    step('inj_quadra','r','injetando...');
-    try{const n=await injectToLayer(quadraFinal,'quadra_viaria');step('inj_quadra','d',`✓ ${n}`);log('ok',`quadra_viaria: ${n}`);}
-    catch(e){step('inj_quadra','f','✗');log('er',`quadra_viaria: ${e.message}`);}
-    pct(74);
-
+    // ── ⑦ INJETANDO CALÇADAS ──────────────────────────────────────
+    setSt('run','⑦ Injetando Calçadas...');
     step('inj_calcada','r','injetando...');
-    try{const n=await injectToLayer(calcadaFeats,'calcadas_meio_fio');step('inj_calcada','d',`✓ ${n}`);log('ok',`calcadas: ${n}`);}
-    catch(e){step('inj_calcada','f','✗');log('er',`calcadas: ${e.message}`);}
-    pct(82);
-
-    step('inj_rua','r','injetando...');
-    try{const n=await injectToLayer(ruaFinal,'ruas');step('inj_rua','d',`✓ ${n}`);log('ok',`ruas: ${n}`);}
-    catch(e){step('inj_rua','f','✗');log('er',`ruas: ${e.message}`);}
+    try {
+      const feats = stampLayer(calcadaFC, ctrlPts, datum, '#d4d4d4','#b0b0b0');
+      const n = await injectDrawingLayer(feats, 'calcadas_meio_fio');
+      step('inj_calcada','d',`✓ ${n}`); log('ok',`calcadas: ${n}`);
+    } catch(e) { step('inj_calcada','f','✗'); log('er',`calcadas: ${e.message}`); }
     pct(90);
 
-    step('inj_curvas','r','injetando...');
-    try{const n=await injectToLayer(lines3D,'curvas_nivel');badge('curvas',String(n),n>0?'ok':'w');step('inj_curvas','d',`✓ ${n}`);log('ok',`curvas_nivel: ${n} linhas 3D`);}
-    catch(e){step('inj_curvas','f','✗');log('er',`curvas_nivel: ${e.message}`);}
+    // ── ⑧ INJETANDO RUAS ─────────────────────────────────────────
+    setSt('run','⑧ Injetando Ruas...');
+    step('inj_rua','r','injetando...');
+    try {
+      const n = await injectDrawingLayer(ruaFeats, 'ruas');
+      step('inj_rua','d',`✓ ${n}`); log('ok',`ruas: ${n}`);
+    } catch(e) { step('inj_rua','f','✗'); log('er',`ruas: ${e.message}`); }
     pct(100);
 
-    // ── FIM ────────────────────────────────────────────────────────
-    try{await rpc.invoke('setTopView',[false]);}catch(_){}
+    // ── FIM ───────────────────────────────────────────────────────
+    try { await rpc.invoke('setTopView',[false]); } catch(_) {}
 
-    const grid=document.getElementById('statsGrid');grid.innerHTML='';
-    for(const[k,v]of Object.entries(stats))
-      grid.innerHTML+=`<div class="sc"><div class="sc-l">${k}</div><div class="sc-v">${v}</div></div>`;
-    document.getElementById('pg-run').style.display='none';
-    document.getElementById('pg-done').style.display='block';
-    setStatus('ok','✓ 5 layers criados no Giraffe!');
-    log('ok','─── Pipeline concluído! 5 Drawing Layers separados ───');
-    log('in','Dica: ative Terrain Overlay (Menu → Terrain) para ver o relevo.');
+    const grid = document.getElementById('statsGrid');
+    grid.innerHTML = '';
+    for (const [k,v] of Object.entries(stats))
+      grid.innerHTML += `<div class="sc"><div class="sc-l">${k}</div><div class="sc-v">${v}</div></div>`;
+    document.getElementById('pg-run').style.display  = 'none';
+    document.getElementById('pg-done').style.display = 'block';
+    setSt('ok','✓ Topografia 3D gerada! 4 layers no Giraffe.');
+    log('ok','─── Pipeline concluído! ───');
 
-  } catch(err){
-    setStatus('err',err.message);log('er',`Erro fatal: ${err.message}`);console.error(err);
-  } finally{
-    busy=false;document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+  } catch(err) {
+    setSt('err', err.message);
+    log('er', `Erro fatal: ${err.message}`);
+    console.error(err);
+  } finally {
+    busy = false;
+    document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // INIT
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 loadProxy();
-log('ok','SDK pronto · KV Arquitetos · Perfil de Terreno 3D');
+log('ok','SDK pronto · KV Arquitetos · Topografia 3D');
 </script>
 </body>
 </html>
