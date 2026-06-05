@@ -138,7 +138,7 @@
         <div class="ll">
           <div class="li">
             <div class="sw" style="background:#4a7c59"></div>
-            <div class="li-i"><div class="li-n">Topografia 3D (TIN)</div><div class="li-m">curvas_mestra + intermediaria → turf.tin() → updateGeoJSONLayerContents</div></div>
+            <div class="li-i"><div class="li-n">Topografia 3D (TIN)</div><div class="li-m">curvas → turf.tin() → createRawSections em lotes de 50</div></div>
             <div class="lb w" id="st-tin">–</div>
           </div>
           <div class="li">
@@ -162,7 +162,7 @@
       <div class="ib">
         <strong>Fonte:</strong> <code>cd_numero_isovalor</code> (int, metros) é o campo real de cota no GeoSampa.<br>
         <strong>Fluxo TIN:</strong> curvas → <code>turf.explode()</code> → pontos com z_val → <code>turf.tin(pts,'z_val')</code> → malha.<br>
-        <strong>TIN:</strong> <code>updateGeoJSONLayerContents</code> (GeoJSON layer, não trava o Giraffe).<br>
+        <strong>TIN:</strong> <code>createRawSections</code> em lotes de 50 (único método com _baseElevation 3D).<br>
         <strong>Urbanas:</strong> <code>createRawSections</code> com <code>_baseElevation</code> por IDW.
       </div>
     </div>
@@ -491,36 +491,73 @@ function subtractAll(baseFeat, subtractFC) {
 //
 // createDrawingLayer → activateDrawingLayer → createRawSections
 // ─────────────────────────────────────────────────────────────────────
-async function injectDrawingLayer(features, layerName) {
-  if (!features?.length) return 0;
-  // Sanitiza: garante props mínimas e coords 2D
-  const clean = features.map(f => ({
-    type:'Feature',
-    geometry: f.geometry,
-    properties: {
+// Sanitiza uma geometria Polygon/MultiPolygon para createRawSections:
+// - Força coords 2D [lng,lat] (remove Z)
+// - Garante anel fechado (primeiro pt == último pt)
+// - Descarta anéis com < 4 pontos
+// - Explode MultiPolygon em Polygons simples
+function sanitizeFeatures(features) {
+  const out = [];
+  for (const f of features) {
+    if (!f?.geometry) continue;
+    const props = {
       color:          f.properties?.color         || '#888888',
       stroke:         f.properties?.stroke        || '#888888',
       strokeWidth:    f.properties?.strokeWidth   ?? 0,
       _baseElevation: f.properties?._baseElevation ?? 0,
       _height:        0,
       _opacity:       f.properties?._opacity      ?? 1,
+    };
+    function cleanRing(ring) {
+      if (!Array.isArray(ring) || ring.length < 3) return null;
+      // Força 2D
+      const r2d = ring.map(c => [c[0], c[1]]);
+      // Fecha o anel se necessário
+      const first = r2d[0], last = r2d[r2d.length-1];
+      if (first[0] !== last[0] || first[1] !== last[1]) r2d.push([...first]);
+      return r2d.length >= 4 ? r2d : null;
     }
-  })).filter(f => {
-    // Remove polígonos inválidos (menos de 4 pontos no anel externo)
-    const coords = f.geometry?.coordinates;
-    return coords && coords[0] && coords[0].length >= 4;
-  });
+    function pushPoly(coordinates) {
+      if (!coordinates?.length) return;
+      const outer = cleanRing(coordinates[0]);
+      if (!outer) return;
+      const holes = (coordinates.slice(1) || []).map(h => cleanRing(h)).filter(Boolean);
+      out.push({ type:'Feature', geometry:{ type:'Polygon', coordinates:[outer,...holes] }, properties:props });
+    }
+    const g = f.geometry;
+    if (g.type === 'Polygon') pushPoly(g.coordinates);
+    else if (g.type === 'MultiPolygon') for (const c of g.coordinates) pushPoly(c);
+    else if (g.type === 'LineString' || g.type === 'MultiLineString') {
+      // Linhas: força 2D
+      const segs = g.type === 'MultiLineString' ? g.coordinates : [g.coordinates];
+      for (const seg of segs) {
+        const c2 = seg.map(c => [c[0],c[1]]);
+        if (c2.length >= 2) out.push({type:'Feature',geometry:{type:'LineString',coordinates:c2},properties:props});
+      }
+    }
+  }
+  return out;
+}
 
-  if (!clean.length) { log('wn',`${layerName}: 0 features válidas`); return 0; }
+async function injectDrawingLayer(features, layerName) {
+  if (!features?.length) return 0;
+  const clean = sanitizeFeatures(features);
+  if (!clean.length) { log('wn',`${layerName}: 0 features válidas após sanitização`); return 0; }
 
+  // Cria e ativa Drawing Layer
   try { await rpc.invoke('createDrawingLayer', [layerName]); } catch(e) { /* já existe */ }
   await rpc.invoke('activateDrawingLayer', [layerName]);
 
-  const BATCH = 150;
+  // Injeta em lotes de 50 (seguro para o motor do Giraffe)
+  const BATCH = 50;
   let total = 0;
   for (let i = 0; i < clean.length; i += BATCH) {
-    await rpc.invoke('createRawSections', [clean.slice(i, i+BATCH)]);
-    total += Math.min(BATCH, clean.length-i);
+    try {
+      await rpc.invoke('createRawSections', [clean.slice(i, i+BATCH)]);
+      total += Math.min(BATCH, clean.length-i);
+    } catch(e) {
+      log('wn', `${layerName}: lote ${i}-${i+BATCH} falhou (${e.message.slice(0,40)}), pulando...`);
+    }
   }
   return total;
 }
@@ -686,15 +723,35 @@ async function pipeline() {
     pct(60);
 
     // ── ⑤ INJETANDO TOPOGRAFIA TIN ───────────────────────────────
-    // updateGeoJSONLayerContents — NÃO usa createRawSections para o TIN
-    // (injeta como GeoJSON layer estático, não trava o Giraffe)
+    // Usa createRawSections em lotes de 50 (ÚNICO método que suporta _baseElevation 3D).
+    // updateGeoJSONLayerContents cria layer estático PLANO — sem elevação.
     setSt('run','⑤ Injetando Topografia 3D...');
     step('inj_tin','r','injetando...');
     if (tinFC && tinCount > 0) {
       try {
-        await rpc.invoke('updateGeoJSONLayerContents', ['Topografia 3D (GeoSampa)', tinFC]);
-        log('ok',`Topografia 3D: ${tinCount} triângulos → GeoJSON layer`);
-        step('inj_tin','d',`✓ ${tinCount}`);
+        // Converter triângulos do TIN para features com props corretas para createRawSections
+        const tinRaw = tinFC.features.map(tri => {
+          // Força coordenadas 2D (createRawSections rejeita Z nas coords)
+          const coords2D = tri.geometry.coordinates.map(ring =>
+            ring.map(c => [c[0], c[1]])
+          );
+          return {
+            type:'Feature',
+            geometry: { type:'Polygon', coordinates: coords2D },
+            properties: {
+              color:          '#4a7c59',
+              stroke:         '#3d6b4e',
+              strokeWidth:    0,
+              _baseElevation: tri.properties._baseElevation ?? 0,
+              _height:        0,
+              _opacity:       0.9,
+            }
+          };
+        }).filter(f => f.geometry.coordinates[0]?.length >= 4);
+
+        const n = await injectDrawingLayer(tinRaw, 'terreno_tin');
+        log('ok',`terreno_tin: ${n} triângulos → Drawing Layer 3D`);
+        step('inj_tin','d',`✓ ${n}`);
       } catch(e) { step('inj_tin','f','✗'); log('er',`TIN inject: ${e.message}`); }
     } else {
       step('inj_tin','d','0 (sem curvas suficientes)');
