@@ -162,8 +162,8 @@
       <div class="ib">
         <strong>Fonte:</strong> <code>cd_numero_isovalor</code> (int, metros) é o campo real de cota no GeoSampa.<br>
         <strong>Fluxo TIN:</strong> curvas → <code>turf.explode()</code> → pontos com z_val → <code>turf.tin(pts,'z_val')</code> → malha.<br>
-        <strong>TIN:</strong> <code>createRawSections</code> em lotes de 50 (único método com _baseElevation 3D).<br>
-        <strong>Urbanas:</strong> <code>createRawSections</code> com <code>_baseElevation</code> por IDW.
+        <strong>TIN:</strong> <code>createRawSections</code> em lotes de 50 (único método com _baseHeight 3D).<br>
+        <strong>Urbanas:</strong> <code>createRawSections</code> com <code>_baseHeight</code> por IDW.
       </div>
     </div>
 
@@ -249,6 +249,7 @@ const LAYER_CURVA_INTER       = 'geoportal:curva_intermediaria';
 const LAYER_QUADRA            = 'geoportal:quadra_viaria_editada';
 const LAYER_CALCADA           = 'geoportal:calcada';
 const CAMPO_COTA              = 'cd_numero_isovalor'; // campo real no GeoSampa
+const EXAGERO_Z               = 3; // multiplicador de elevação (ajuste conforme necessário)
 const WFS                     = 'https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/wfs';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -415,7 +416,7 @@ function buildTIN(turfPts, datum) {
     const zMean = zVals.length
       ? zVals.reduce((s,v)=>s+v,0) / zVals.length
       : datum;
-    const zRel = Math.max(0, Math.round((zMean - datum) * 10) / 10);
+    const zRel = Math.max(0, Math.round((zMean - datum) * EXAGERO_Z * 10) / 10);
     return {
       ...tri,
       properties: {
@@ -424,7 +425,7 @@ function buildTIN(turfPts, datum) {
         'fill-opacity': 0.85,
         stroke: '#4a7c59',
         'stroke-width': 0,
-        _baseElevation: zRel,
+        _baseHeight: zRel,
       }
     };
   });
@@ -435,7 +436,7 @@ function buildTIN(turfPts, datum) {
 // ─────────────────────────────────────────────────────────────────────
 // PASSO 3 — Stampar camadas urbanas no perfil (IDW)
 //
-// Retorna features com _baseElevation relativo ao datum.
+// Retorna features com _baseHeight relativo ao datum.
 // Coordenadas são 2D (createRawSections não aceita Z nas coords).
 // ─────────────────────────────────────────────────────────────────────
 function stampLayer(fc, ctrlPts, datum, color, stroke) {
@@ -449,13 +450,13 @@ function stampLayer(fc, ctrlPts, datum, color, stroke) {
       const ring = rings[0];
       const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
       const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
-      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
+      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*EXAGERO_Z*10)/10) : 0;
       // Força coordenadas 2D
       const rings2D = rings.map(r => r.map(([x,y])=>[x,y]));
       out.push({
         type:'Feature',
         geometry: {type:'Polygon', coordinates: rings2D},
-        properties: { color, stroke, strokeWidth:1, _baseElevation:z, _height:0, _opacity:1 }
+        properties: { color, stroke, strokeWidth:1, _baseHeight:z, _height:0, _opacity:1 }
       });
     }
   }
@@ -471,19 +472,43 @@ function subtractAll(baseFeat, subtractFC) {
   let remaining = baseFeat;
   for (const f of (subtractFC.features || [])) {
     if (!remaining || !f.geometry) continue;
-    const subs = f.geometry.type==='MultiPolygon'
-      ? f.geometry.coordinates.map(c=>turf.polygon(c))
-      : [turf.feature(f.geometry)];
+    // Normaliza subtrator para Polygon simples
+    let subs = [];
+    try {
+      if (f.geometry.type === 'MultiPolygon') {
+        subs = f.geometry.coordinates.map(c => turf.polygon(c));
+      } else if (f.geometry.type === 'Polygon') {
+        // Valida que tem pelo menos 4 coordenadas no anel externo
+        if (f.geometry.coordinates[0]?.length >= 4) {
+          subs = [turf.polygon(f.geometry.coordinates)];
+        }
+      }
+    } catch(e) { continue; }
+
     for (const s of subs) {
       if (!remaining) break;
-      try { const d = turf.difference(remaining, s); if (d) remaining = d; } catch(e) {}
+      try {
+        const d = turf.difference(remaining, s);
+        // Valida que o resultado é um polígono válido
+        if (d && d.geometry && (d.geometry.type === 'Polygon' || d.geometry.type === 'MultiPolygon')) {
+          remaining = d;
+        }
+      } catch(e) {}
     }
   }
-  if (!remaining) return [];
+  if (!remaining?.geometry) return [];
   const g = remaining.geometry;
-  return g.type==='Polygon'      ? [remaining]
-       : g.type==='MultiPolygon' ? g.coordinates.map(c=>({type:'Feature',geometry:{type:'Polygon',coordinates:c},properties:{}}))
-       : [];
+  if (g.type === 'Polygon') {
+    // Valida anel externo
+    if (g.coordinates[0]?.length >= 4) return [remaining];
+    return [];
+  }
+  if (g.type === 'MultiPolygon') {
+    return g.coordinates
+      .filter(c => c[0]?.length >= 4)
+      .map(c => ({type:'Feature', geometry:{type:'Polygon',coordinates:c}, properties:{}}));
+  }
+  return [];
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -504,7 +529,7 @@ function sanitizeFeatures(features) {
       color:          f.properties?.color         || '#888888',
       stroke:         f.properties?.stroke        || '#888888',
       strokeWidth:    f.properties?.strokeWidth   ?? 0,
-      _baseElevation: f.properties?._baseElevation ?? 0,
+      _baseHeight: f.properties?._baseHeight ?? 0,
       _height:        0,
       _opacity:       f.properties?._opacity      ?? 1,
     };
@@ -712,9 +737,9 @@ async function pipeline() {
       const ring = g.geometry.coordinates[0];
       const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
       const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
-      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
+      const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*EXAGERO_Z*10)/10) : 0;
       return {type:'Feature', geometry:g.geometry,
-        properties:{color:'#4a4a4a',stroke:'#333',strokeWidth:0,_baseElevation:z,_height:0,_opacity:1}};
+        properties:{color:'#4a4a4a',stroke:'#333',strokeWidth:0,_baseHeight:z,_height:0,_opacity:1}};
     });
     badge('rua', String(ruaFeats.length), ruaFeats.length>0?'ok':'w');
     stats['Ruas'] = ruaFeats.length;
@@ -723,7 +748,7 @@ async function pipeline() {
     pct(60);
 
     // ── ⑤ INJETANDO TOPOGRAFIA TIN ───────────────────────────────
-    // Usa createRawSections em lotes de 50 (ÚNICO método que suporta _baseElevation 3D).
+    // Usa createRawSections em lotes de 50 (ÚNICO método que suporta _baseHeight 3D).
     // updateGeoJSONLayerContents cria layer estático PLANO — sem elevação.
     setSt('run','⑤ Injetando Topografia 3D...');
     step('inj_tin','r','injetando...');
@@ -742,7 +767,7 @@ async function pipeline() {
               color:          '#4a7c59',
               stroke:         '#3d6b4e',
               strokeWidth:    0,
-              _baseElevation: tri.properties._baseElevation ?? 0,
+              _baseHeight: tri.properties._baseHeight ?? 0,
               _height:        0,
               _opacity:       0.9,
             }
@@ -771,9 +796,9 @@ async function pipeline() {
         const ring = g.geometry.coordinates[0];
         const cx = ring.reduce((s,p)=>s+p[0],0)/ring.length;
         const cy = ring.reduce((s,p)=>s+p[1],0)/ring.length;
-        const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*10)/10) : 0;
+        const z  = ctrlPts.length ? Math.max(0, Math.round((idw(cx,cy,ctrlPts)-datum)*EXAGERO_Z*10)/10) : 0;
         quadraFinal.push({type:'Feature',geometry:g.geometry,
-          properties:{color:'#f5f0e8',stroke:'#d4c9a8',strokeWidth:1,_baseElevation:z,_height:0,_opacity:1}});
+          properties:{color:'#f5f0e8',stroke:'#d4c9a8',strokeWidth:1,_baseHeight:z,_height:0,_opacity:1}});
       }
     }
 
