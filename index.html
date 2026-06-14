@@ -30,8 +30,8 @@ body{font-family:'Hind',sans-serif;background:#000;color:#ddd;font-size:13px;}
 .b-idle{background:#111;color:#3a3a3a;}
 .chip{border-radius:3px;border:1px solid #111;padding:5px 8px;
   display:flex;align-items:center;justify-content:space-between;}
-.ch-found{border-color:#00ACCD;background:rgba(0,172,205,.04);}
-.ch-empty{opacity:.38;}.ch-pend{opacity:.5;}
+.ch-f{border-color:#00ACCD;background:rgba(0,172,205,.04);}
+.ch-e{opacity:.38;}.ch-p{opacity:.5;}
 .fld{background:#050505;border:1px solid #1e1e1e;border-radius:4px;
   padding:5px 9px;color:#ddd;font-family:'Hind',sans-serif;font-size:12px;outline:none;}
 .fld:focus{border-color:#00ACCD;}.fld::placeholder{color:#222;}
@@ -43,6 +43,9 @@ body{font-family:'Hind',sans-serif;background:#000;color:#ddd;font-size:13px;}
 .pf{height:100%;background:#00ACCD;border-radius:1px;transition:width .35s;}
 .sg{display:grid;grid-template-columns:auto 1fr;gap:0 12px;align-items:baseline;}
 .sk{font-size:10px;color:#444;padding:1px 0;}.sv{font-size:11px;color:#00ACCD;font-weight:600;}
+/* slider */
+input[type=range]{flex:1;appearance:none;height:3px;background:#1a1a1a;border-radius:2px;outline:none;cursor:pointer;}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:#00ACCD;border:2px solid #000;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -53,56 +56,163 @@ import{createRoot}from'https://esm.sh/react-dom@18/client';
 import{rpc}from'https://esm.sh/@gi-nx/iframe-sdk@latest';
 import*as turf from'https://esm.sh/@turf/turf@6.5.0';
 
-// ── UTM Zone 23S (EPSG:31983) ─────────────────────────────────
-const RAD=d=>d*Math.PI/180;
-function ll2utm(lng,lat){
-  const a=6378137,f=1/298.257223563,b=a*(1-f),e2=(a*a-b*b)/(a*a),ep2=e2/(1-e2);
-  const phi=RAD(lat),lam=RAD(lng),lo=RAD(-45);
-  const N=a/Math.sqrt(1-e2*Math.sin(phi)**2),T=Math.tan(phi)**2,C=ep2*Math.cos(phi)**2;
-  const A_=Math.cos(phi)*(lam-lo);
-  const M=a*((1-e2/4-3*e2**2/64-5*e2**3/256)*phi
-    -(3*e2/8+3*e2**2/32+45*e2**3/1024)*Math.sin(2*phi)
-    +(15*e2**2/256+45*e2**3/1024)*Math.sin(4*phi)
-    -(35*e2**3/3072)*Math.sin(6*phi));
-  return{
-    x:500000+0.9996*N*(A_+(1-T+C)*A_**3/6+(5-18*T+T**2+72*C-58*ep2)*A_**5/120),
-    y:10000000+0.9996*(M+N*Math.tan(phi)*(A_**2/2+(5-T+9*C+4*C**2)*A_**4/24
-      +(61-58*T+T**2+600*C-330*ep2)*A_**6/720))
-  };
+// ══════════════════════════════════════════════════════════════
+//  WFS — URL correto do GeoSampa (copiado do index.html)
+// ══════════════════════════════════════════════════════════════
+const WFS_BASE='https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/ows';
+
+let _proxyUrl='';
+function buildProxiedUrl(wfsUrl){
+  const b=_proxyUrl.replace(/\/$/,'');
+  if(!b) return wfsUrl;
+  return`${b}?url=${encodeURIComponent(wfsUrl)}`;
+}
+function buildWFSUrl(typeId,minX,minY,maxX,maxY,maxFeatures){
+  const p=new URLSearchParams({
+    service:'WFS',version:'1.1.0',request:'GetFeature',
+    typeName:typeId,outputFormat:'application/json',
+    maxFeatures:String(maxFeatures),srsName:'EPSG:4326',
+    bbox:`${minX},${minY},${maxX},${maxY},EPSG:4326`,
+  });
+  return`${WFS_BASE}?${p}`;
 }
 
-// ── WFS via proxy Cloudflare Worker ──────────────────────────
-const WFS='https://geosampa.prefeitura.sp.gov.br/PaginasPublicas/SWF_Arquivo/geosampa_wfs';
-async function fetchWFS({proxy,tn,bbox,max=500,ms=35000}){
-  const[x0,y0,x1,y1]=bbox;
-  const url=`${WFS}?service=WFS&version=1.1.0&request=GetFeature`
-    +`&typeName=${tn}&maxFeatures=${max}&srsName=EPSG:4326`
-    +`&BBOX=${x0},${y0},${x1},${y1},EPSG:4326&outputFormat=application/json`;
-  const ctrl=new AbortController();
-  const t=setTimeout(()=>ctrl.abort(),ms);
+// Cópia fiel do fetchWFS do index.html
+async function fetchWFS(typeId,minX,minY,maxX,maxY,maxFeatures,timeoutMs){
+  const wfsUrl=buildWFSUrl(typeId,minX,minY,maxX,maxY,maxFeatures);
+  const fetchUrl=buildProxiedUrl(wfsUrl);
+  const ms=timeoutMs||25000;
+  let res;
   try{
-    const r=await fetch(`${proxy}?url=${encodeURIComponent(url)}`,{signal:ctrl.signal});
-    clearTimeout(t);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j=await r.json();
-    if(j.error) throw new Error(String(j.error));
-    return j;
-  }catch(e){clearTimeout(t);throw e;}
+    res=await fetch(fetchUrl,{signal:AbortSignal.timeout(ms)});
+  }catch(e){
+    const isTimeout=e.name==='AbortError'||e.name==='TimeoutError';
+    if(isTimeout) throw Object.assign(new Error('Timeout'),{_kind:'timeout'});
+    throw Object.assign(new Error('CORS — proxy não configurado'),{_kind:'cors'});
+  }
+  if(!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`),{_kind:'http'});
+  // Lê como texto e tenta parsear JSON — igual ao index.html
+  const text=await res.text();
+  let json;
+  try{json=JSON.parse(text);}
+  catch(_){
+    if(text.trim().startsWith('<'))
+      throw Object.assign(new Error('Sem dados WFS (raster ou não vetorial)'),{_kind:'nowfs'});
+    throw Object.assign(new Error('Resposta inválida do servidor'),{_kind:'parse'});
+  }
+  if(json.exceptions||json.ExceptionReport)
+    throw Object.assign(new Error('WFS exception no servidor'),{_kind:'wfsexc'});
+  return json;
 }
 
-// ── Camadas de curva de nível ──────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+//  UTM Zone 23S — cópia fiel do ll2utm do index.html
+// ══════════════════════════════════════════════════════════════
+function ll2utm(lng,lat){
+  const a=6378137.0,f=1/298.257223563,b=a*(1-f);
+  const e2=(a*a-b*b)/(a*a),ep2=e2/(1-e2),k0=0.9996;
+  const lon0=(-45)*Math.PI/180;
+  const latR=lat*Math.PI/180,lonR=lng*Math.PI/180;
+  const N=a/Math.sqrt(1-e2*Math.sin(latR)**2);
+  const T=Math.tan(latR)**2,C=ep2*Math.cos(latR)**2;
+  const A=Math.cos(latR)*(lonR-lon0);
+  const M=a*((1-e2/4-3*e2**2/64-5*e2**3/256)*latR
+    -(3*e2/8+3*e2**2/32+45*e2**3/1024)*Math.sin(2*latR)
+    +(15*e2**2/256+45*e2**3/1024)*Math.sin(4*latR)
+    -(35*e2**3/3072)*Math.sin(6*latR));
+  let x=k0*N*(A+(1-T+C)*A**3/6+(5-18*T+T**2+72*C-58*ep2)*A**5/120)+500000;
+  let y=k0*(M+N*Math.tan(latR)*(A**2/2+(5-T+9*C+4*C**2)*A**4/24
+    +(61-58*T+T**2+600*C-330*ep2)*A**6/720));
+  if(lat<0) y+=10000000;
+  return[Math.round(x*100)/100,Math.round(y*100)/100];
+}
+
+// GeoJSON geometry → WKT EPSG:31983 — cópia fiel do geojsonToWKT do index.html
+function geojsonToWKT(geometry){
+  const pt=([lng,lat])=>{const[x,y]=ll2utm(lng,lat);return`${x} ${y}`;};
+  if(geometry.type==='Polygon'){
+    const ring=geometry.coordinates[0].map(pt).join(',');
+    return`SRID=31983;POLYGON((${ring}))`;
+  }
+  if(geometry.type==='MultiPolygon'){
+    const polys=geometry.coordinates.map(p=>`((${p[0].map(pt).join(',')}))`).join(',');
+    return`SRID=31983;MULTIPOLYGON(${polys})`;
+  }
+  return null;
+}
+
+// Cache de coluna geométrica (igual ao index.html)
+const _geomColCache={};
+function _guessGeomCols(typeId){
+  const n=typeId.replace(/^[^:]+:/,'').toLowerCase();
+  const isLine=/curva|linha|logradouro|segmento|via_|calcada|cal.ada|ferr|rio_|corrego|duto|rede_|trilho|limite_|divisoria|faixa/.test(n);
+  const isPoint=/ponto|marco|arvore|cotado|equip|poste|boca_lobo/.test(n);
+  if(isLine)  return['ge_linha',  'ge_poligono','ge_ponto'];
+  if(isPoint) return['ge_ponto',  'ge_poligono','ge_linha'];
+  return             ['ge_poligono','ge_linha',  'ge_ponto'];
+}
+
+async function _fetchWithCol(typeId,wkt,maxFeatures,geomCol,ms){
+  const p=new URLSearchParams({
+    service:'WFS',version:'1.1.0',request:'GetFeature',
+    typeName:typeId,outputFormat:'application/json',
+    maxFeatures:String(maxFeatures),srsName:'EPSG:4326',
+    CQL_FILTER:`INTERSECTS(${geomCol},${wkt})`,
+  });
+  const raw=`${WFS_BASE}?${p}`;
+  let res;
+  try{
+    res=await fetch(buildProxiedUrl(raw),{signal:AbortSignal.timeout(ms||20000)});
+  }catch(e){
+    const isTimeout=e.name==='AbortError'||e.name==='TimeoutError';
+    if(isTimeout) throw Object.assign(new Error('Timeout'),{_kind:'timeout'});
+    throw Object.assign(new Error('CORS'),{_kind:'cors'});
+  }
+  if(!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`),{_kind:'http'});
+  const text=await res.text();
+  let json;
+  try{json=JSON.parse(text);}
+  catch(_){
+    if(text.trim().startsWith('<')) throw Object.assign(new Error('coluna não existe'),{_kind:'wfsexc'});
+    throw Object.assign(new Error('Resposta inválida'),{_kind:'parse'});
+  }
+  if(json.exceptions||json.ExceptionReport) throw Object.assign(new Error('coluna não existe'),{_kind:'wfsexc'});
+  return json;
+}
+
+// Busca WFS com INTERSECTS, tentando colunas em sequência — cópia do fetchWFSByGeom
+async function fetchWFSByGeom(typeId,wkt,maxFeatures,ms){
+  if(_geomColCache[typeId]) return _fetchWithCol(typeId,wkt,maxFeatures,_geomColCache[typeId],ms);
+  const cols=_guessGeomCols(typeId);
+  let lastErr=null;
+  for(const col of cols){
+    try{
+      const result=await _fetchWithCol(typeId,wkt,maxFeatures,col,ms);
+      _geomColCache[typeId]=col;
+      return result;
+    }catch(e){
+      if(e._kind==='wfsexc'){lastErr=e;continue;}
+      throw e;
+    }
+  }
+  throw Object.assign(new Error('Sem dados WFS'),{_kind:'nowfs'});
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Camadas de curva de nível alvo
+// ══════════════════════════════════════════════════════════════
 const LAYERS=[
   {id:'ci',  lb:'Curva Intermediária',    tn:'geoportal:curva_intermediaria',   col:'#34d399'},
   {id:'cis', lb:'Curva Intermediária -S', tn:'geoportal:curva_intermediaria_s', col:'#6ee7b7'},
   {id:'cm',  lb:'Curva Mestra',           tn:'geoportal:curva_mestra',          col:'#fb923c'},
   {id:'cms', lb:'Curva Mestra -S',        tn:'geoportal:curva_mestra_s',        col:'#fcd34d'},
 ];
-
-// Ordem de fases para lógica de badge
 const PHASES=['idle','selecting','ready_scan','scanning','ready_gen',
                'fetching','tinning','ready_patch','patching','done'];
 
-// ── Amostragem de pontos das curvas (cd_numero_isovalor) ──────
+// ══════════════════════════════════════════════════════════════
+//  Extração de pontos de elevação (cd_numero_isovalor)
+// ══════════════════════════════════════════════════════════════
 function samplePoints(fcs){
   const pts=[];
   for(const fc of fcs){
@@ -122,13 +232,12 @@ function samplePoints(fcs){
   return pts;
 }
 
-// ── Triangulação TIN (Delaunator) ──────────────────────────────
-// Retorna features com properties.ha/hb/hc = alturas reais de cada vértice
+// ══════════════════════════════════════════════════════════════
+//  TIN via Delaunator — preserva alturas individuais por vértice
+// ══════════════════════════════════════════════════════════════
 async function buildTIN(pts,datum){
   const{default:Delaunator}=await import('https://esm.sh/delaunator@5.0.0');
   if(pts.length<4) throw new Error(`Pontos insuficientes: ${pts.length}`);
-
-  // Deduplica pontos muito próximos (~0.5m)
   const SNAP=5e-6;
   const seen=new Map(),cl=[];
   for(const p of pts){
@@ -136,10 +245,7 @@ async function buildTIN(pts,datum){
     if(!seen.has(k)){seen.set(k,true);cl.push(p);}
   }
   if(cl.length<4) throw new Error('Pontos deduplicados insuficientes');
-
   const d=new Delaunator(cl.flatMap(p=>[p.lng,p.lat]));
-
-  // Limiar adaptativo de aresta (mediana × 7)
   const samp=[];
   for(let i=0;i<Math.min(d.triangles.length,1200);i+=3){
     const A=cl[d.triangles[i]],B=cl[d.triangles[i+1]];
@@ -147,7 +253,6 @@ async function buildTIN(pts,datum){
   }
   samp.sort((a,b)=>a-b);
   const maxEdge=Math.max((samp[samp.length>>1]||0.001)*7,3e-4);
-
   const feats=[];
   for(let i=0;i<d.triangles.length;i+=3){
     const A=cl[d.triangles[i]],B=cl[d.triangles[i+1]],C=cl[d.triangles[i+2]];
@@ -156,70 +261,60 @@ async function buildTIN(pts,datum){
       Math.hypot(B.lng-C.lng,B.lat-C.lat),
       Math.hypot(C.lng-A.lng,C.lat-A.lat)
     )>maxEdge) continue;
-
-    // Alturas relativas ao datum (zero = elevação mínima da área)
     const ha=Math.max(0,A.elev-datum);
     const hb=Math.max(0,B.elev-datum);
     const hc=Math.max(0,C.elev-datum);
-    const avgH=(ha+hb+hc)/3;
-
     feats.push({
       type:'Feature',
-      properties:{
-        height:avgH,   // para preview fill-extrusion
-        ha,hb,hc,      // alturas por vértice → patch[]
-      },
-      geometry:{
-        type:'Polygon',
-        // Polygon: vértices A,B,C + fechamento (A repetido)
-        // patch[] tem exatamente 3 elementos, um por vértice único
-        coordinates:[[[A.lng,A.lat],[B.lng,B.lat],[C.lng,C.lat],[A.lng,A.lat]]]
-      }
+      properties:{height:(ha+hb+hc)/3,ha,hb,hc},
+      geometry:{type:'Polygon',
+        coordinates:[[[A.lng,A.lat],[B.lng,B.lat],[C.lng,C.lat],[A.lng,A.lat]]]}
     });
   }
   return{type:'FeatureCollection',features:feats};
 }
 
-// ── Converte TIN em raw sections com propriedade patch ─────────
+// Converte TIN em raw sections com propriedade patch (formato nativo Giraffe)
 function tinToPatches(tin){
-  return tin.features.map(f=>{
-    const{ha,hb,hc}=f.properties;
-    return{
-      type:'Feature',
-      geometry:f.geometry,
-      properties:{
-        // patch: array alinhado aos vértices do polígono (sem o ponto de fechamento)
-        patch:[ha,hb,hc],
-        patchType:'slab',
-      }
-    };
-  });
+  return tin.features.map(f=>({
+    type:'Feature',
+    geometry:f.geometry,
+    properties:{
+      // patch[i] = altura do vértice i em metros (sem o ponto de fechamento)
+      patch:[f.properties.ha,f.properties.hb,f.properties.hc],
+      patchType:'slab',
+    }
+  }));
 }
 
-// ── App ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+//  App React
+// ══════════════════════════════════════════════════════════════
 const PREVIEW_ID='kv-terrain-preview';
 const LAYER_NAME='Terreno GeoSampa';
 
 function App(){
-  const[proxy,setProxy]=useState(()=>localStorage.getItem('geosampa_proxy')||'');
-  const[buf,setBuf]=useState(60);
-  const[geo,setGeo]=useState(null);       // {geom, bbox, bgeom}
-  const[scan,setScan]=useState({});       // {id: 'found'|'empty'|'err'}
-  const[tin,setTin]=useState(null);       // FeatureCollection TIN
+  const[proxy,setProxy]=useState(()=>{
+    const v=localStorage.getItem('geosampa_proxy')||'';
+    _proxyUrl=v;return v;
+  });
+  const[buf,setBuf]=useState(150);
+  const[geo,setGeo]=useState(null);      // {geom, bbox:[x0,y0,x1,y1], wkt}
+  const[scan,setScan]=useState({});      // {id:'found'|'empty'|'err'}
+  const[tin,setTin]=useState(null);
   const[phase,setPhase]=useState('idle');
   const[pct,setPct]=useState(0);
   const[stats,setStats]=useState(null);
   const[logs,setLogs]=useState([]);
   const logEl=useRef(null);
 
-  const sp=v=>{setProxy(v);localStorage.setItem('geosampa_proxy',v);};
+  const sp=v=>{setProxy(v);_proxyUrl=v;localStorage.setItem('geosampa_proxy',v);};
   const lg=(t,m)=>{
     const ts=new Date().toLocaleTimeString('pt-BR',{hour12:false});
     setLogs(p=>[...p,{t,m,ts}].slice(-400));
   };
   useEffect(()=>{if(logEl.current)logEl.current.scrollTop=logEl.current.scrollHeight;},[logs]);
 
-  // Fase "busy" = está processando algo
   const phIdx=p=>PHASES.indexOf(p);
   const busy=['selecting','scanning','fetching','tinning','patching'].includes(phase);
 
@@ -230,7 +325,7 @@ function App(){
     return'bdg b-idle';
   }
 
-  // ─── Passo 1: Selecionar terreno ──────────────────────────────
+  // ─── Passo 1: Selecionar ────────────────────────────────────
   const doSel=async()=>{
     if(!proxy.trim()){lg('err','Configure o proxy primeiro.');return;}
     setPhase('selecting');
@@ -240,31 +335,38 @@ function App(){
       if(!ss?.length) throw new Error('Nenhum elemento clicado');
       const poly=ss.find(s=>['Polygon','MultiPolygon'].includes(s.geometry?.type));
       if(!poly) throw new Error('O elemento clicado não é um polígono');
+      // Aplica buffer e calcula bbox + WKT UTM
       const bfrd=turf.buffer({type:'Feature',geometry:poly.geometry},buf,{units:'meters'});
-      setGeo({geom:poly.geometry,bbox:turf.bbox(bfrd),bgeom:bfrd.geometry});
+      const[x0,y0,x1,y1]=turf.bbox(bfrd);
+      const wkt=geojsonToWKT(bfrd.geometry);
+      setGeo({geom:poly.geometry,bbox:[x0,y0,x1,y1],wkt});
       setScan({});setTin(null);setStats(null);
       setPhase('ready_scan');
-      lg('ok',`Polígono capturado — buffer ${buf} m aplicado.`);
+      lg('ok',`Polígono capturado. Buffer ${buf} m → BBOX pronto.`);
     }catch(e){lg('err',e.message);setPhase('idle');}
   };
 
-  // ─── Passo 2: Escanear camadas ────────────────────────────────
+  // ─── Passo 2: Escanear ──────────────────────────────────────
   const doScan=async()=>{
     if(!geo||!proxy||busy) return;
     setPhase('scanning');setScan({});setPct(0);
-    lg('info','Escaneando camadas de curva de nível no GeoSampa...');
+    const[x0,y0,x1,y1]=geo.bbox;
+    lg('info',`Escaneando camadas com BBOX+buffer ${buf} m...`);
     const ns={};
     for(let i=0;i<LAYERS.length;i++){
       const L=LAYERS[i];
       lg('info',`Verificando ${L.lb}...`);
       try{
-        const fc=await fetchWFS({proxy,tn:L.tn,bbox:geo.bbox,max:1,ms:12000});
+        // Usa INTERSECTS com WKT (mais preciso que BBOX puro)
+        const fc=geo.wkt
+          ?await fetchWFSByGeom(L.tn,geo.wkt,1,12000)
+          :await fetchWFS(L.tn,x0,y0,x1,y1,1,12000);
         const ok=(fc?.features?.length??0)>0;
         ns[L.id]=ok?'found':'empty';
-        lg(ok?'ok':'warn',`${L.lb}: ${ok?'✓ dados presentes':'∅ sem dados'}`);
+        lg(ok?'ok':'warn',`${L.lb}: ${ok?'✓ dados presentes':'∅ sem dados na área'}`);
       }catch(e){
         ns[L.id]='err';
-        lg('warn',`${L.lb}: ${e.message.slice(0,60)}`);
+        lg('warn',`${L.lb}: ${e.message.slice(0,70)}`);
       }
       setPct(Math.round((i+1)/LAYERS.length*100));
     }
@@ -279,54 +381,53 @@ function App(){
     }
   };
 
-  // ─── Passo 3a: Calcular TIN (preview e preparação) ────────────
-  const doCalcTIN=async()=>{
+  // ─── Passo 3a: Calcular TIN + preview ──────────────────────
+  const doCalc=async()=>{
     const fnd=LAYERS.filter(L=>scan[L.id]==='found');
     if(!geo||!proxy||!fnd.length||busy) return;
     setPhase('fetching');setPct(0);setStats(null);
+    const[x0,y0,x1,y1]=geo.bbox;
     lg('info','━━ Calculando mesh TIN das curvas de nível ━━');
     try{
-      // Fetch das curvas com dados
+      // Fetch de cada camada encontrada
       const fcs=[];
       for(let i=0;i<fnd.length;i++){
         const L=fnd[i];
         lg('info',`Baixando ${L.lb}...`);
-        const fc=await fetchWFS({proxy,tn:L.tn,bbox:geo.bbox,max:3000,ms:50000});
+        const fc=geo.wkt
+          ?await fetchWFSByGeom(L.tn,geo.wkt,3000,50000)
+          :await fetchWFS(L.tn,x0,y0,x1,y1,3000,50000);
         const n=fc?.features?.length??0;
         lg('ok',`${L.lb}: ${n} feições`);
         if(n>0) fcs.push(fc);
         setPct(Math.round((i+1)/fnd.length*50));
       }
-
       // Amostrar pontos de elevação
       setPhase('tinning');
       lg('info','Extraindo pontos de elevação (cd_numero_isovalor)...');
       const pts=samplePoints(fcs);
       if(pts.length<8) throw new Error(
         `Pontos insuficientes (${pts.length}). `
-        +'Verifique se as curvas têm o campo cd_numero_isovalor preenchido.');
-
+        +'Verifique se cd_numero_isovalor está preenchido nas curvas.');
       const elevs=pts.map(p=>p.elev);
       const eMin=Math.min(...elevs),eMax=Math.max(...elevs);
-      const datum=eMin; // zero relativo = menor elevação da área
-      lg('ok',`${pts.length} pts de controle | ${eMin} → ${eMax} m | datum=${datum} m`);
+      const datum=eMin; // zero relativo = menor cota da área
+      lg('ok',`${pts.length} pts | ${eMin} → ${eMax} m | datum=${datum} m (nível do mar)`);
       setPct(65);
-
       // Triangulação
       lg('info','Triangulando TIN (Delaunay)...');
       const tinResult=await buildTIN(pts,datum);
       const ntri=tinResult.features.length;
-      if(!ntri) throw new Error('Nenhum triângulo válido gerado.');
+      if(!ntri) throw new Error('Nenhum triângulo válido. Pontos colineares?');
       setTin(tinResult);
-      lg('ok',`TIN: ${ntri} triângulos com alturas por vértice`);
+      lg('ok',`TIN: ${ntri} triângulos, alturas por vértice calculadas`);
       setPct(85);
-
-      // Preview temporário (fill-extrusion para visualização rápida)
-      lg('info','Gerando preview temporário no mapa...');
+      // Preview temporário
+      lg('info','Gerando preview no mapa...');
       const maxH=eMax-datum;
       const cex=['interpolate',['linear'],['get','height'],
-        0,'#1a3a28', maxH*.15,'#1d6347', maxH*.35,'#25a265',
-        maxH*.55,'#6ec97e', maxH*.75,'#c8e6a0', maxH,'#f0ede2'];
+        0,'#1a3a28',maxH*.15,'#1d6347',maxH*.35,'#25a265',
+        maxH*.55,'#6ec97e',maxH*.75,'#c8e6a0',maxH,'#f0ede2'];
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
       await rpc.invoke('addTempLayerGeoJSON',[
         PREVIEW_ID,tinResult,
@@ -336,10 +437,9 @@ function App(){
           'fill-extrusion-base':0,'fill-extrusion-opacity':0.88,
         }}
       ]);
-
       setPct(100);
       setStats({eMin,eMax,dnivel:eMax-eMin,datum,ntri,npts:pts.length});
-      lg('ok','Preview visível. Clique em "Fixar Patches" para criar objetos editáveis.');
+      lg('ok','Preview visível. Use "Fixar Patches" para criar objetos 3D editáveis.');
       setPhase('ready_patch');
     }catch(e){
       lg('err',`Erro: ${e.message}`);
@@ -347,48 +447,40 @@ function App(){
     }
   };
 
-  // ─── Passo 3b: Fixar como patches editáveis ────────────────────
-  // Cria um Drawing Layer e importa os triângulos como raw sections patch
+  // ─── Passo 3b: Fixar como patches editáveis ─────────────────
   const doFixar=async()=>{
     if(!tin||phase!=='ready_patch'||busy) return;
     setPhase('patching');setPct(0);
-    lg('info','━━ Criando patches editáveis no Giraffe ━━');
+    lg('info','━━ Criando patches 3D editáveis no projeto ━━');
     try{
-      // 1. Criar drawing layer dedicado
+      // Criar drawing layer dedicado
       lg('info',`Criando layer "${LAYER_NAME}"...`);
       await rpc.invoke('createDrawingLayer',[LAYER_NAME]);
       await rpc.invoke('activateDrawingLayer',[LAYER_NAME]);
       lg('ok',`Layer "${LAYER_NAME}" criado e ativado.`);
       setPct(20);
-
-      // 2. Converter TIN para raw sections com propriedade patch
+      // Criar patches em lote
       const patches=tinToPatches(tin);
-      lg('info',`Inserindo ${patches.length} patches no projeto...`);
-      setPct(35);
-
-      // createRawSections aceita array de features em uma só chamada
+      lg('info',`Inserindo ${patches.length} patches (patchType: slab)...`);
+      setPct(40);
       await rpc.invoke('createRawSections',[patches]);
-      setPct(90);
-
-      // 3. Remover preview temporário (patches são o resultado final)
+      // Remover preview (patches substituem)
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
-
       setPct(100);
-      lg('ok',`✓ ${patches.length} patches criados no layer "${LAYER_NAME}"!`);
-      lg('ok','O terreno é agora editável — cada triângulo pode ser ajustado individualmente.');
+      lg('ok',`✓ ${patches.length} patches criados em "${LAYER_NAME}"!`);
+      lg('ok','Cada triângulo do terreno é agora um objeto editável no Giraffe.');
       setPhase('done');
     }catch(e){
-      lg('err',`Erro ao criar patches: ${e.message}`);
-      setPhase('ready_patch'); // mantém o preview e permite tentar de novo
-      setPct(0);
+      lg('err',`Erro ao fixar patches: ${e.message}`);
+      setPhase('ready_patch');setPct(0);
     }
   };
 
-  // ─── Limpar ────────────────────────────────────────────────────
+  // ─── Limpar ─────────────────────────────────────────────────
   const doClear=async()=>{
     try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
-    setGeo(null);setScan({});setTin(null);setPhase('idle');
-    setPct(0);setStats(null);setLogs([]);
+    setGeo(null);setScan({});setTin(null);
+    setPhase('idle');setPct(0);setStats(null);setLogs([]);
   };
 
   const hasGeo=!!geo;
@@ -397,7 +489,6 @@ function App(){
   const canGen=hasGeo&&hasFnd&&!busy&&['ready_gen','ready_patch','done'].includes(phase);
   const canPatch=!!tin&&!busy&&phase==='ready_patch';
   const isBusy2=['fetching','tinning'].includes(phase);
-  const isPatch=phase==='patching';
 
   return h('div',{style:{display:'flex',flexDirection:'column',height:'100%',padding:'9px',gap:'7px',overflow:'hidden'}},
 
@@ -411,20 +502,26 @@ function App(){
         onClick:doClear,disabled:busy},'✕ limpar')
     ),
 
-    // Config
+    // Config — Proxy + Buffer slider
     h('div',{className:'card'},
       h('p',{style:{fontSize:'9px',letterSpacing:'1.5px',color:'#222',textTransform:'uppercase',marginBottom:'7px'}},'Configuração'),
-      h('div',{style:{display:'flex',gap:'5px',alignItems:'center',marginBottom:'5px'}},
+      h('div',{style:{display:'flex',gap:'5px',alignItems:'center',marginBottom:'8px'}},
         h('span',{style:{fontSize:'10px',color:'#3a3a3a',width:'36px',flexShrink:0}},'Proxy'),
         h('input',{className:'fld',style:{flex:1},
           placeholder:'https://…workers.dev',value:proxy,onChange:e=>sp(e.target.value)})
       ),
-      h('div',{style:{display:'flex',gap:'5px',alignItems:'center'}},
+      // Slider de buffer
+      h('div',{style:{display:'flex',alignItems:'center',gap:'8px'}},
         h('span',{style:{fontSize:'10px',color:'#3a3a3a',width:'36px',flexShrink:0}},'Buffer'),
-        h('input',{className:'fld',type:'number',min:0,max:1000,
-          style:{width:'52px',textAlign:'center'},value:buf,onChange:e=>setBuf(Number(e.target.value))}),
-        h('span',{style:{fontSize:'10px',color:'#2a2a2a'}},' m')
-      )
+        h('input',{
+          type:'range',min:25,max:500,step:25,value:buf,
+          onChange:e=>setBuf(Number(e.target.value)),
+          disabled:hasGeo // trava após seleção para manter consistência
+        }),
+        h('span',{style:{fontSize:'11px',color:'#00ACCD',fontWeight:600,minWidth:'46px',textAlign:'right'}},`${buf} m`)
+      ),
+      hasGeo&&h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'4px'}},
+        '⚠ Buffer fixado após seleção. Clique em "limpar" para redefinir.')
     ),
 
     // Passo 1 — Selecionar
@@ -434,7 +531,7 @@ function App(){
         h('span',{style:{fontSize:'12px',fontWeight:600}},'Selecionar Terreno')
       ),
       hasGeo
-        ?h('p',{style:{fontSize:'10px',color:'#4ade80'}},`✓  Polígono capturado — buffer de ${buf} m`)
+        ?h('p',{style:{fontSize:'10px',color:'#4ade80'}},`✓  Polígono capturado com buffer de ${buf} m`)
         :h('button',{className:'btn btn-pri',style:{width:'100%'},
             onClick:doSel,disabled:busy||!proxy.trim()},
             phase==='selecting'?'⏳  Aguardando clique no mapa...':'🖱  Clicar em um polígono no mapa')
@@ -455,7 +552,7 @@ function App(){
         marginBottom:phase==='scanning'?'6px':'0'}},
         ...LAYERS.map(L=>{
           const s=scan[L.id];
-          return h('div',{key:L.id,className:`chip ${!s?'ch-pend':s==='found'?'ch-found':'ch-empty'}`},
+          return h('div',{key:L.id,className:`chip ${!s?'ch-p':s==='found'?'ch-f':'ch-e'}`},
             h('span',{style:{fontSize:'10px',fontWeight:500,color:s==='found'?L.col:'#2a2a2a'}},L.lb),
             h('span',{style:{fontSize:'9px',color:'#333'}},!s?'—':s==='found'?'✓':s==='empty'?'∅':'✗')
           );
@@ -472,35 +569,28 @@ function App(){
           h('span',{className:bdg(['ready_gen','fetching','tinning','ready_patch','patching'])},'3'),
           h('span',{style:{fontSize:'12px',fontWeight:600}},'Gerar Terreno')
         ),
-        // Botões: Calcular TIN | Fixar Patches
         h('div',{style:{display:'flex',gap:'5px'}},
           h('button',{className:'btn btn-pri',style:{fontSize:'10px',padding:'4px 10px'},
-            onClick:doCalcTIN,disabled:!canGen},
+            onClick:doCalc,disabled:!canGen},
             isBusy2?'⏳':'▶ Calcular'),
           h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'4px 10px'},
             title:'Cria patches 3D editáveis no projeto Giraffe',
             onClick:doFixar,disabled:!canPatch},
-            isPatch?'⏳ Fixando...':'📌 Fixar Patches')
+            phase==='patching'?'⏳ Fixando...':'📌 Fixar Patches')
         )
       ),
-
-      // Barra de progresso
-      (isBusy2||isPatch)&&h('div',{className:'pb',style:{marginTop:'6px'}},
+      (isBusy2||phase==='patching')&&h('div',{className:'pb',style:{marginTop:'6px'}},
         h('div',{className:'pf',style:{width:`${pct}%`}})),
-
-      // Legenda das fases quando TIN calculado
-      phase==='ready_patch'&&!stats&&null,
-      phase==='ready_patch'&&h('p',{style:{fontSize:'9px',color:'#00ACCD',marginTop:'5px'}},
-        '● Preview visível. "Fixar Patches" cria objetos 3D editáveis no projeto.'),
-
-      // Estatísticas
+      phase==='ready_patch'&&h('p',{
+        style:{fontSize:'9px',color:'#00ACCD',marginTop:'5px',lineHeight:1.4}},
+        '● Preview visível no mapa. "Fixar Patches" cria objetos editáveis com altura por vértice.'),
       stats&&h('div',{className:'sg',style:{marginTop:'7px'}},
-        h('span',{className:'sk'},'Elev. mínima'), h('span',{className:'sv'},`${stats.eMin} m s.n.m.`),
-        h('span',{className:'sk'},'Elev. máxima'), h('span',{className:'sv'},`${stats.eMax} m s.n.m.`),
-        h('span',{className:'sk'},'Desnível'),      h('span',{className:'sv'},`${stats.dnivel} m`),
-        h('span',{className:'sk'},'Datum (zero)'),  h('span',{className:'sv'},`${stats.datum} m s.n.m.`),
-        h('span',{className:'sk'},'Triâng. TIN'),   h('span',{className:'sv'},stats.ntri.toLocaleString('pt-BR')),
-        h('span',{className:'sk'},'Pts controle'),  h('span',{className:'sv'},stats.npts.toLocaleString('pt-BR')),
+        h('span',{className:'sk'},'Elev. mínima'),  h('span',{className:'sv'},`${stats.eMin} m`),
+        h('span',{className:'sk'},'Elev. máxima'),  h('span',{className:'sv'},`${stats.eMax} m`),
+        h('span',{className:'sk'},'Desnível'),       h('span',{className:'sv'},`${stats.dnivel} m`),
+        h('span',{className:'sk'},'Datum (zero)'),   h('span',{className:'sv'},`${stats.datum} m s.n.m.`),
+        h('span',{className:'sk'},'Triâng. TIN'),    h('span',{className:'sv'},stats.ntri.toLocaleString('pt-BR')),
+        h('span',{className:'sk'},'Pts controle'),   h('span',{className:'sv'},stats.npts.toLocaleString('pt-BR')),
         phase==='done'&&h('span',{className:'sk'},'Layer'),
         phase==='done'&&h('span',{className:'sv'},LAYER_NAME),
       )
