@@ -1,626 +1,524 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>KV — Relevo 3D → GLB</title>
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-  <script src="https://unpkg.com/delaunator@5.0.0/delaunator.min.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Hind:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-  <style>
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    :root{
-      --kv:#00ACCD;--kvd:#007f99;
-      --bg:#0a0a0a;--s1:#111;--s2:#1a1a1a;--brd:#252525;--brd2:#333;
-      --txt:#e8e8e8;--mut:#666;--grn:#3ddba0;--grd:#1f7a5c;
-      --wrn:#f5a623;--err:#ff5f72;
-      --m:'IBM Plex Mono',monospace;--s:'Hind',sans-serif;--r:6px;
-    }
-    html,body{height:100%;width:100%;background:var(--bg);color:var(--txt);font-family:var(--s);font-size:13px;overflow:hidden}
-    .shell{display:flex;flex-direction:column;height:100vh}
-    .hdr{background:#000;padding:12px 16px 10px;flex-shrink:0;border-bottom:2px solid var(--kv)}
-    .hdr-t{font-family:var(--m);font-size:12px;font-weight:500;color:#fff;letter-spacing:.04em}
-    .hdr-s{font-family:var(--m);font-size:8.5px;color:var(--kv);letter-spacing:.12em;text-transform:uppercase;margin-top:4px}
-    .tabs{display:flex;padding:0 16px;background:var(--s1);border-bottom:1px solid var(--brd);flex-shrink:0}
-    .tab{padding:8px 12px;font-size:11px;font-weight:500;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s;user-select:none;white-space:nowrap}
-    .tab.active{color:var(--kv);border-bottom-color:var(--kv)}.tab:not(.active):hover{color:var(--txt)}
-    .panels{flex:1;overflow:hidden}
-    .panel{display:none;flex-direction:column;height:100%;overflow-y:auto;padding:12px 14px 14px;gap:10px;scrollbar-width:thin;scrollbar-color:var(--brd) transparent}
-    .panel.active{display:flex}
-    .card{background:var(--s1);border:1px solid var(--brd);border-radius:var(--r);padding:12px}
-    .card-l{font-family:var(--m);font-size:9px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
-    .pill{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--s2);border:1px solid var(--brd);border-radius:var(--r)}
-    .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-    .dot.idle{background:var(--mut)}.dot.run{background:var(--wrn);animation:bl .6s infinite}.dot.ok{background:var(--grn)}.dot.err{background:var(--err)}
-    @keyframes bl{0%,100%{opacity:1}50%{opacity:.3}}
-    .ptxt{font-size:11px;font-weight:500;flex:1}
-    .ptxt.idle{color:var(--mut)}.ptxt.run{color:var(--wrn)}.ptxt.ok{color:var(--grn)}.ptxt.err{color:var(--err)}
-    .btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 14px;border-radius:var(--r);border:none;font-family:var(--s);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s}
-    .btn:active{transform:scale(.97)}.btn:disabled{opacity:.4;cursor:not-allowed}
-    .btn-p{background:var(--kv);color:#000;width:100%}.btn-p:hover:not(:disabled){background:var(--kvd)}
-    .btn-g{background:var(--s2);border:1px solid var(--brd);color:var(--txt)}.btn-g:hover:not(:disabled){border-color:var(--kv);color:var(--kv)}
-    .btn-sm{padding:5px 10px;font-size:10px}
-    .brow{display:flex;gap:8px}
-    .srow{display:flex;align-items:center;gap:10px}
-    input[type=range]{flex:1;appearance:none;height:3px;background:var(--brd2);border-radius:2px;outline:none;cursor:pointer}
-    input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--kv);border:2px solid var(--bg);cursor:pointer}
-    .sv{font-family:var(--m);font-size:11px;color:var(--kv);min-width:44px;text-align:right}
-    .bbox-g{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-    .bbox-i{background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);padding:6px 8px}
-    .bbox-i label{font-family:var(--m);font-size:8px;color:var(--mut);display:block;margin-bottom:2px}
-    .bbox-i span{font-family:var(--m);font-size:11px;color:var(--kv)}
-    .sg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-    .sc{background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);padding:8px 10px}
-    .sc-l{font-family:var(--m);font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
-    .sc-v{font-family:var(--m);font-size:15px;font-weight:500;color:var(--kv);margin-top:2px}
-    .lw{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
-    .le{display:flex;gap:7px;font-family:var(--m);font-size:10px;padding:4px 6px;border-radius:4px;background:var(--s2);animation:fi .15s}
-    @keyframes fi{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-    .le.ok{color:var(--grn)}.le.wn{color:var(--wrn)}.le.er{color:var(--err)}.le.in{color:var(--mut)}
-    .lt{opacity:.5;flex-shrink:0}
-    .pi{background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);padding:7px 9px;color:var(--txt);font-family:var(--m);font-size:10px;outline:none;width:100%}
-    .pi:focus{border-color:var(--kv)}.pi::placeholder{color:var(--mut)}
-    .ps{font-family:var(--m);font-size:9px;margin-top:5px;padding:5px 8px;border-radius:5px;display:none}
-    .ps.ok{background:rgba(61,219,160,.08);border:1px solid var(--grd);color:var(--grn)}
-    .ps.fail{background:rgba(255,95,114,.08);border:1px solid rgba(255,95,114,.3);color:var(--err)}
-    .ps.test{background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.3);color:var(--wrn)}
-    .cb{background:var(--s2);border:1px solid var(--brd);border-radius:5px;padding:10px;font-size:9px;font-family:var(--m);color:var(--mut);line-height:1.6;overflow-x:auto;white-space:pre;max-height:130px;overflow-y:auto}
-    .ib{background:rgba(0,172,205,.05);border:1px solid rgba(0,172,205,.15);border-radius:var(--r);padding:8px 10px;font-family:var(--m);font-size:9px;color:var(--mut);line-height:1.7}
-    .ib strong{color:var(--kv)}
-    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--brd2);border-radius:2px}
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Perfil de Terreno 3D · KV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Hind:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body,#root{height:100%;width:100%;overflow:hidden;}
+body{font-family:'Hind',sans-serif;background:#000;color:#ddd;font-size:13px;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:#050505;}
+::-webkit-scrollbar-thumb{background:#1e1e1e;border-radius:2px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  padding:6px 13px;border-radius:4px;font-weight:600;font-size:12px;
+  cursor:pointer;border:none;transition:all .15s;white-space:nowrap;font-family:'Hind',sans-serif;}
+.btn:disabled{opacity:.28;cursor:not-allowed;}
+.btn-pri{background:#00ACCD;color:#000;}.btn-pri:not(:disabled):hover{background:#00c5e8;}
+.btn-out{background:transparent;color:#00ACCD;border:1px solid #00ACCD;}
+.btn-out:not(:disabled):hover{background:rgba(0,172,205,.08);}
+.btn-gh{background:transparent;color:#555;border:1px solid #1e1e1e;}
+.btn-gh:not(:disabled):hover{color:#888;border-color:#333;}
+.card{background:#080808;border:1px solid #141414;border-radius:5px;padding:10px 11px;}
+.bdg{width:19px;height:19px;border-radius:50%;font-size:10px;font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+.b-act{background:#00ACCD;color:#000;}.b-done{background:#14532d;color:#4ade80;font-size:8px;}
+.b-idle{background:#111;color:#3a3a3a;}
+.chip{border-radius:3px;border:1px solid #111;padding:5px 8px;
+  display:flex;align-items:center;justify-content:space-between;}
+.ch-found{border-color:#00ACCD;background:rgba(0,172,205,.04);}
+.ch-empty{opacity:.38;}.ch-pend{opacity:.5;}
+.fld{background:#050505;border:1px solid #1e1e1e;border-radius:4px;
+  padding:5px 9px;color:#ddd;font-family:'Hind',sans-serif;font-size:12px;outline:none;}
+.fld:focus{border-color:#00ACCD;}.fld::placeholder{color:#222;}
+.lg{background:#030303;border:1px solid #0d0d0d;border-radius:4px;
+  font-family:'Courier New',monospace;font-size:10px;line-height:1.55;
+  overflow-y:auto;padding:6px 8px;}
+.lo{color:#4ade80;}.le{color:#f87171;}.lw{color:#fbbf24;}.li{color:#666;}.lt{color:#222;}
+.pb{height:2px;background:#111;border-radius:1px;overflow:hidden;}
+.pf{height:100%;background:#00ACCD;border-radius:1px;transition:width .35s;}
+.sg{display:grid;grid-template-columns:auto 1fr;gap:0 12px;align-items:baseline;}
+.sk{font-size:10px;color:#444;padding:1px 0;}.sv{font-size:11px;color:#00ACCD;font-weight:600;}
+</style>
 </head>
 <body>
-<div class="shell">
-  <div class="hdr">
-    <div class="hdr-t">Königsberger Vannucchi · Relevo 3D → GLB</div>
-    <div class="hdr-s">GeoSampa WFS · Delaunator TIN · Three.js → GLB Download</div>
-  </div>
-  <div class="tabs">
-    <div class="tab active" data-tab="cfg" onclick="ST('cfg')">① Configurar</div>
-    <div class="tab" data-tab="log" onclick="ST('log')">② Log</div>
-    <div class="tab" data-tab="prx" onclick="ST('prx')">⚙ Proxy</div>
-  </div>
-  <div class="panels">
-
-    <!-- ① CONFIGURAR -->
-    <div class="panel active" id="panel-cfg">
-      <div class="pill"><div class="dot idle" id="dot"></div><div class="ptxt idle" id="stTxt">Aguardando...</div></div>
-
-      <div class="card">
-        <div class="card-l">Terreno de referência</div>
-        <div style="font-family:var(--m);font-size:9px;color:var(--mut);line-height:1.7;margin-bottom:10px">
-          Clique em <strong style="color:var(--kv)">🖱 Selecionar no mapa</strong> para definir a BBOX.<br>
-          O app busca os pontos cotados + curvas de nível e gera o <strong style="color:var(--kv)">.glb</strong> para download.
-        </div>
-        <div class="brow">
-          <button class="btn btn-p" style="flex:1" onclick="pickAndRun()">🖱 Selecionar no mapa</button>
-          <button class="btn btn-g btn-sm" onclick="runFromSel()">▶ Seleção atual</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-l">Buffer / Exagero vertical / Rotação norte</div>
-        <div class="srow" style="margin-bottom:6px">
-          <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Buffer</span>
-          <input type="range" id="bufSlider" min="50" max="400" step="25" value="150" oninput="updBuf(this.value)">
-          <div class="sv" id="bufVal">150 m</div>
-        </div>
-        <div class="srow" style="margin-bottom:6px">
-          <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Exagero Z</span>
-          <input type="range" id="zSlider" min="1" max="20" step="1" value="3" oninput="updZ(this.value)">
-          <div class="sv" id="zVal">3×</div>
-        </div>
-        <div class="srow">
-          <span style="font-family:var(--m);font-size:9px;color:var(--mut);min-width:50px">Rotação °</span>
-          <input type="range" id="rotSlider" min="-180" max="180" step="5" value="0" oninput="updRot(this.value)">
-          <div class="sv" id="rotVal">0°</div>
-        </div>
-        <div style="font-family:var(--m);font-size:8px;color:var(--mut);margin-top:4px;line-height:1.5">
-          Se o modelo aparecer girado no mapa, ajuste a rotação aqui e gere novamente.
-        </div>
-        <div class="bbox-g">
-          <div class="bbox-i"><label>OESTE</label><span id="bW">—</span></div>
-          <div class="bbox-i"><label>SUL</label><span id="bS">—</span></div>
-          <div class="bbox-i"><label>LESTE</label><span id="bE">—</span></div>
-          <div class="bbox-i"><label>NORTE</label><span id="bN">—</span></div>
-        </div>
-      </div>
-
-      <div id="statsBox" style="display:none">
-        <div class="card">
-          <div class="card-l">Resultado</div>
-          <div class="sg" id="statsGrid"></div>
-        </div>
-      </div>
-
-      <div class="ib">
-        <strong>Fontes:</strong> <code>ponto_cotado</code> (cd_altitude) + <code>curva_mestra/intermediaria</code> (cd_numero_isovalor).<br>
-        <strong>Pipeline:</strong> WFS → pontos 3D → <code>Delaunator.from()</code> → TIN → <code>Three.js</code> mesh → <code>GLTFExporter</code> → <strong>.glb</strong><br>
-        <strong>Uso:</strong> Arraste o <code>.glb</code> para o projeto no Giraffe.
-      </div>
-    </div>
-
-    <!-- ② LOG -->
-    <div class="panel" id="panel-log">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <span style="font-family:var(--m);font-size:9px;color:var(--mut)">LOG</span>
-        <button class="btn btn-g btn-sm" onclick="clrLog()">limpar</button>
-      </div>
-      <div class="lw" id="logWrap"><div class="le in"><span class="lt">--:--:--</span><span>Pronto.</span></div></div>
-    </div>
-
-    <!-- ⚙ PROXY -->
-    <div class="panel" id="panel-prx">
-      <div class="card">
-        <div class="card-l">Cloudflare Worker — Proxy CORS</div>
-        <p style="font-family:var(--m);font-size:9px;color:var(--mut);line-height:1.6;margin-bottom:10px">
-          GeoSampa bloqueia chamadas diretas (CORS). Use seu <strong style="color:var(--kv)">Cloudflare Worker</strong>.
-        </p>
-        <div style="font-family:var(--m);font-size:9px;color:var(--mut);margin-bottom:4px">URL do Worker</div>
-        <input type="text" class="pi" id="proxyInp" placeholder="https://geosampa-proxy.seu-usuario.workers.dev" oninput="saveProxy(this.value)"/>
-        <div class="ps" id="proxySt"></div>
-        <div class="brow" style="margin-top:10px">
-          <button class="btn btn-p" style="flex:1;font-size:11px" onclick="testProxy()">✓ Testar</button>
-          <button class="btn btn-g btn-sm" onclick="clearProxy()">Limpar</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-l">worker.js</div>
-        <div class="cb" id="wCode">addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
-async function handleRequest(request) {
-  const url = new URL(request.url)
-  const target = url.searchParams.get('url')
-  if (!target) return new Response('Missing ?url=', { status: 400 })
-  const response = await fetch(decodeURIComponent(target), {
-    headers: { 'User-Agent': 'Mozilla/5.0' }
-  })
-  const body = await response.arrayBuffer()
-  return new Response(body, {
-    status: response.status,
-    headers: {
-      'Content-Type': response.headers.get('Content-Type') || 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    }
-  })
-}</div>
-        <button class="btn btn-g btn-sm" style="margin-top:8px;width:100%" onclick="cpyW()">Copiar código</button>
-      </div>
-    </div>
-
-  </div>
-</div>
-
+<div id="root"></div>
 <script type="module">
-import { giraffeState, rpc } from 'https://esm.sh/@gi-nx/iframe-sdk@latest';
+import{createElement as h,useState,useEffect,useRef}from'https://esm.sh/react@18';
+import{createRoot}from'https://esm.sh/react-dom@18/client';
+import{rpc}from'https://esm.sh/@gi-nx/iframe-sdk@latest';
+import*as turf from'https://esm.sh/@turf/turf@6.5.0';
 
-// ═══════════════════════════════════════════════════════════════════════
-// CONFIGURAÇÃO
-// ═══════════════════════════════════════════════════════════════════════
-const WFS           = 'https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/wfs';
-const LAYER_PONTO   = 'geoportal:ponto_cotado';
-const LAYER_MESTRA  = 'geoportal:curva_mestra';
-const LAYER_INTER   = 'geoportal:curva_intermediaria';
-const CAMPO_ALTITUDE = 'cd_altitude';          // ponto_cotado
-const CAMPO_ISOVALOR = 'cd_numero_isovalor';   // curvas de nível
-
-// Conversão graus → metros (latitude de São Paulo ≈ -23.55)
-const LAT_SP    = -23.55;
-const M_PER_DEG_LAT = 111320;
-const M_PER_DEG_LNG = 111320 * Math.cos(LAT_SP * Math.PI / 180);
-
-// ═══════════════════════════════════════════════════════════════════════
-// PROXY
-// ═══════════════════════════════════════════════════════════════════════
-let proxy = '';
-function loadProxy() { try { proxy = localStorage.getItem('geosampa_proxy') || ''; } catch(e) {} const el = document.getElementById('proxyInp'); if (el) el.value = proxy; }
-window.saveProxy  = v => { proxy = v.trim(); try { localStorage.setItem('geosampa_proxy', proxy); } catch(e) {} };
-window.clearProxy = () => { proxy = ''; document.getElementById('proxyInp').value = ''; try { localStorage.removeItem('geosampa_proxy'); } catch(e) {} showPS('',''); };
-window.testProxy  = async () => {
-  const u = document.getElementById('proxyInp').value.trim();
-  if (!u) { showPS('fail','Insira uma URL.'); return; }
-  showPS('test','Testando...');
-  try {
-    const r = await fetch(pu(WFS+'?service=WFS&version=1.1.0&request=GetCapabilities',u),{signal:AbortSignal.timeout(12000)});
-    if (r.ok) { proxy=u; window.saveProxy(u); showPS('ok',`✓ OK`); log('ok','Proxy OK'); } else showPS('fail',`HTTP ${r.status}`);
-  } catch(e) { showPS('fail',e.message); }
-};
-function showPS(t,m) { const el=document.getElementById('proxySt'); if(!m){el.style.display='none';return;} el.style.display='block'; el.className=`ps ${t}`; el.textContent=m; }
-function pu(url,base) { const b=(base||proxy).replace(/\/$/,''); return b?`${b}?url=${encodeURIComponent(url)}`:url; }
-window.cpyW = () => navigator.clipboard.writeText(document.getElementById('wCode').textContent)
-  .then(()=>{const b=event.target;b.textContent='✓ Copiado!';setTimeout(()=>b.textContent='Copiar código',1800);});
-
-// ═══════════════════════════════════════════════════════════════════════
-// WFS
-// ═══════════════════════════════════════════════════════════════════════
-async function fetchWFS(typeName, bbox, maxF=1000, ms=45000) {
-  const {minX,minY,maxX,maxY} = bbox;
-  const url = `${WFS}?${new URLSearchParams({
-    service:'WFS', version:'1.1.0', request:'GetFeature',
-    typeName, outputFormat:'application/json',
-    maxFeatures: String(maxF), srsName:'EPSG:4326',
-    bbox: `${minX},${minY},${maxX},${maxY},EPSG:4326`,
-  })}`;
-  const res = await fetch(pu(url), {signal:AbortSignal.timeout(ms)});
-  if (!res.ok) throw new Error(`HTTP ${res.status} — ${typeName}`);
-  const json = await res.json();
-  if (json.exceptions||json.ExceptionReport) throw new Error(`WFS exception — ${typeName}`);
-  return json;
+// ── UTM Zone 23S (EPSG:31983) ─────────────────────────────────
+const RAD=d=>d*Math.PI/180;
+function ll2utm(lng,lat){
+  const a=6378137,f=1/298.257223563,b=a*(1-f),e2=(a*a-b*b)/(a*a),ep2=e2/(1-e2);
+  const phi=RAD(lat),lam=RAD(lng),lo=RAD(-45);
+  const N=a/Math.sqrt(1-e2*Math.sin(phi)**2),T=Math.tan(phi)**2,C=ep2*Math.cos(phi)**2;
+  const A_=Math.cos(phi)*(lam-lo);
+  const M=a*((1-e2/4-3*e2**2/64-5*e2**3/256)*phi
+    -(3*e2/8+3*e2**2/32+45*e2**3/1024)*Math.sin(2*phi)
+    +(15*e2**2/256+45*e2**3/1024)*Math.sin(4*phi)
+    -(35*e2**3/3072)*Math.sin(6*phi));
+  return{
+    x:500000+0.9996*N*(A_+(1-T+C)*A_**3/6+(5-18*T+T**2+72*C-58*ep2)*A_**5/120),
+    y:10000000+0.9996*(M+N*Math.tan(phi)*(A_**2/2+(5-T+9*C+4*C**2)*A_**4/24
+      +(61-58*T+T**2+600*C-330*ep2)*A_**6/720))
+  };
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// GEO HELPERS
-// ═══════════════════════════════════════════════════════════════════════
-const DLAT = 1/M_PER_DEG_LAT, DLNG = 1/M_PER_DEG_LNG;
-function expandBbox(b,m) { return {minX:b.minX-m*DLNG,minY:b.minY-m*DLAT,maxX:b.maxX+m*DLNG,maxY:b.maxY+m*DLAT}; }
-function mergeBbox(a,b) { if(!a)return b; return{minX:Math.min(a.minX,b.minX),minY:Math.min(a.minY,b.minY),maxX:Math.max(a.maxX,b.maxX),maxY:Math.max(a.maxY,b.maxY)}; }
-function featureBbox(f) {
-  const pts=[]; function walk(a,d){if(d===0){pts.push(a);return;}for(const x of a)walk(x,d-1);}
-  const D={Point:0,LineString:1,Polygon:2,MultiPoint:1,MultiLineString:2,MultiPolygon:3};
-  walk(f.geometry.coordinates,D[f.geometry.type]??2);
-  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
-  for(const[x,y]of pts){if(x<x0)x0=x;if(y<y0)y0=y;if(x>x1)x1=x;if(y>y1)y1=y;}
-  return{minX:x0,minY:y0,maxX:x1,maxY:y1};
+// ── WFS via proxy Cloudflare Worker ──────────────────────────
+const WFS='https://geosampa.prefeitura.sp.gov.br/PaginasPublicas/SWF_Arquivo/geosampa_wfs';
+async function fetchWFS({proxy,tn,bbox,max=500,ms=35000}){
+  const[x0,y0,x1,y1]=bbox;
+  const url=`${WFS}?service=WFS&version=1.1.0&request=GetFeature`
+    +`&typeName=${tn}&maxFeatures=${max}&srsName=EPSG:4326`
+    +`&BBOX=${x0},${y0},${x1},${y1},EPSG:4326&outputFormat=application/json`;
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),ms);
+  try{
+    const r=await fetch(`${proxy}?url=${encodeURIComponent(url)}`,{signal:ctrl.signal});
+    clearTimeout(t);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j=await r.json();
+    if(j.error) throw new Error(String(j.error));
+    return j;
+  }catch(e){clearTimeout(t);throw e;}
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// COLETA DE PONTOS 3D
-// Combina ponto_cotado (cd_altitude) + curvas de nível (cd_numero_isovalor)
-// ═══════════════════════════════════════════════════════════════════════
-function collectPoints(pontoFC, mestraFC, interFC) {
-  const pts = []; // { lng, lat, alt }
+// ── Camadas de curva de nível ──────────────────────────────────
+const LAYERS=[
+  {id:'ci',  lb:'Curva Intermediária',    tn:'geoportal:curva_intermediaria',   col:'#34d399'},
+  {id:'cis', lb:'Curva Intermediária -S', tn:'geoportal:curva_intermediaria_s', col:'#6ee7b7'},
+  {id:'cm',  lb:'Curva Mestra',           tn:'geoportal:curva_mestra',          col:'#fb923c'},
+  {id:'cms', lb:'Curva Mestra -S',        tn:'geoportal:curva_mestra_s',        col:'#fcd34d'},
+];
 
-  // 1. Pontos cotados — fonte principal (altitude decimal precisa)
-  for (const f of (pontoFC?.features || [])) {
-    const alt = parseFloat(f.properties?.[CAMPO_ALTITUDE]);
-    if (isNaN(alt) || alt <= 0) continue;
-    const [lng, lat] = f.geometry.coordinates;
-    pts.push({ lng, lat, alt });
-  }
-  log('ok', `Pontos cotados: ${pts.length} pontos com altitude`);
+// Ordem de fases para lógica de badge
+const PHASES=['idle','selecting','ready_scan','scanning','ready_gen',
+               'fetching','tinning','ready_patch','patching','done'];
 
-  // 2. Curvas de nível — explode para pontos individuais
-  let curvaCount = 0;
-  for (const fc of [mestraFC, interFC]) {
-    for (const f of (fc?.features || [])) {
-      const alt = parseFloat(f.properties?.[CAMPO_ISOVALOR]);
-      if (isNaN(alt) || alt <= 0) continue;
-      // turf.explode quebra a linha em pontos isolados
-      try {
-        const exploded = turf.explode(f);
-        for (const pt of (exploded.features || [])) {
-          const [lng, lat] = pt.geometry.coordinates;
-          pts.push({ lng, lat, alt });
-          curvaCount++;
-        }
-      } catch(e) {}
+// ── Amostragem de pontos das curvas (cd_numero_isovalor) ──────
+function samplePoints(fcs){
+  const pts=[];
+  for(const fc of fcs){
+    for(const f of(fc?.features||[])){
+      const elev=parseFloat(f.properties?.cd_numero_isovalor);
+      if(isNaN(elev)) continue;
+      const g=f.geometry;
+      const lines=g.type==='LineString'?[g.coordinates]:g.type==='MultiLineString'?g.coordinates:[];
+      for(const ln of lines){
+        const step=Math.max(1,Math.floor(ln.length/20));
+        for(let i=0;i<ln.length;i+=step) pts.push({lng:ln[i][0],lat:ln[i][1],elev});
+        const last=ln[ln.length-1];
+        if(last) pts.push({lng:last[0],lat:last[1],elev});
+      }
     }
   }
-  log('ok', `Curvas de nível: ${curvaCount} pontos explodidos`);
+  return pts;
+}
 
-  // Deduplicar pontos coincidentes
-  const seen = new Set();
-  const unique = pts.filter(p => {
-    const k = `${p.lng.toFixed(7)},${p.lat.toFixed(7)}`;
-    if (seen.has(k)) return false;
-    seen.add(k); return true;
+// ── Triangulação TIN (Delaunator) ──────────────────────────────
+// Retorna features com properties.ha/hb/hc = alturas reais de cada vértice
+async function buildTIN(pts,datum){
+  const{default:Delaunator}=await import('https://esm.sh/delaunator@5.0.0');
+  if(pts.length<4) throw new Error(`Pontos insuficientes: ${pts.length}`);
+
+  // Deduplica pontos muito próximos (~0.5m)
+  const SNAP=5e-6;
+  const seen=new Map(),cl=[];
+  for(const p of pts){
+    const k=`${p.lng/SNAP|0},${p.lat/SNAP|0}`;
+    if(!seen.has(k)){seen.set(k,true);cl.push(p);}
+  }
+  if(cl.length<4) throw new Error('Pontos deduplicados insuficientes');
+
+  const d=new Delaunator(cl.flatMap(p=>[p.lng,p.lat]));
+
+  // Limiar adaptativo de aresta (mediana × 7)
+  const samp=[];
+  for(let i=0;i<Math.min(d.triangles.length,1200);i+=3){
+    const A=cl[d.triangles[i]],B=cl[d.triangles[i+1]];
+    samp.push(Math.hypot(A.lng-B.lng,A.lat-B.lat));
+  }
+  samp.sort((a,b)=>a-b);
+  const maxEdge=Math.max((samp[samp.length>>1]||0.001)*7,3e-4);
+
+  const feats=[];
+  for(let i=0;i<d.triangles.length;i+=3){
+    const A=cl[d.triangles[i]],B=cl[d.triangles[i+1]],C=cl[d.triangles[i+2]];
+    if(Math.max(
+      Math.hypot(A.lng-B.lng,A.lat-B.lat),
+      Math.hypot(B.lng-C.lng,B.lat-C.lat),
+      Math.hypot(C.lng-A.lng,C.lat-A.lat)
+    )>maxEdge) continue;
+
+    // Alturas relativas ao datum (zero = elevação mínima da área)
+    const ha=Math.max(0,A.elev-datum);
+    const hb=Math.max(0,B.elev-datum);
+    const hc=Math.max(0,C.elev-datum);
+    const avgH=(ha+hb+hc)/3;
+
+    feats.push({
+      type:'Feature',
+      properties:{
+        height:avgH,   // para preview fill-extrusion
+        ha,hb,hc,      // alturas por vértice → patch[]
+      },
+      geometry:{
+        type:'Polygon',
+        // Polygon: vértices A,B,C + fechamento (A repetido)
+        // patch[] tem exatamente 3 elementos, um por vértice único
+        coordinates:[[[A.lng,A.lat],[B.lng,B.lat],[C.lng,C.lat],[A.lng,A.lat]]]
+      }
+    });
+  }
+  return{type:'FeatureCollection',features:feats};
+}
+
+// ── Converte TIN em raw sections com propriedade patch ─────────
+function tinToPatches(tin){
+  return tin.features.map(f=>{
+    const{ha,hb,hc}=f.properties;
+    return{
+      type:'Feature',
+      geometry:f.geometry,
+      properties:{
+        // patch: array alinhado aos vértices do polígono (sem o ponto de fechamento)
+        patch:[ha,hb,hc],
+        patchType:'slab',
+      }
+    };
   });
-  log('ok', `Total: ${unique.length} pontos únicos (de ${pts.length} brutos)`);
-  return unique;
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// CONVERSÃO PARA COORDENADAS LOCAIS EM METROS
-// Centro da BBOX = origem (0, 0, 0)
-// Three.js: X = Leste, Y = Altitude (up), Z = Sul (negativo lat)
-// ═══════════════════════════════════════════════════════════════════════
-function toLocalMeters(pts, centerLng, centerLat, datum, exagero) {
-  return pts.map(p => ({
-    x:  (p.lng - centerLng) * M_PER_DEG_LNG,           // Leste
-    y:  (p.alt - datum) * exagero,                       // Altitude relativa × exagero
-    z: -(p.lat - centerLat) * M_PER_DEG_LAT,            // Sul (negativo)
-  }));
-}
+// ── App ────────────────────────────────────────────────────────
+const PREVIEW_ID='kv-terrain-preview';
+const LAYER_NAME='Terreno GeoSampa';
 
-// ═══════════════════════════════════════════════════════════════════════
-// TRIANGULAÇÃO + MESH + GLB EXPORT
-// ═══════════════════════════════════════════════════════════════════════
-function buildAndExportGLB(localPts, stats) {
-  // ── 1. Delaunator ────────────────────────────────────────────────
-  const coords2D = localPts.map(p => [p.x, p.z]);
-  const delaunay = Delaunator.from(coords2D);
-  const rawTris = delaunay.triangles.length / 3;
-  if (rawTris === 0) throw new Error('0 triângulos.');
+function App(){
+  const[proxy,setProxy]=useState(()=>localStorage.getItem('geosampa_proxy')||'');
+  const[buf,setBuf]=useState(60);
+  const[geo,setGeo]=useState(null);       // {geom, bbox, bgeom}
+  const[scan,setScan]=useState({});       // {id: 'found'|'empty'|'err'}
+  const[tin,setTin]=useState(null);       // FeatureCollection TIN
+  const[phase,setPhase]=useState('idle');
+  const[pct,setPct]=useState(0);
+  const[stats,setStats]=useState(null);
+  const[logs,setLogs]=useState([]);
+  const logEl=useRef(null);
 
-  // ── 2. Filtrar triângulos com arestas muito longas ───────────────
-  // Delaunator gera casco convexo — triângulos gigantes nas bordas.
-  const edgeLens = [];
-  for (let t = 0; t < rawTris; t++) {
-    const i0=delaunay.triangles[t*3], i1=delaunay.triangles[t*3+1], i2=delaunay.triangles[t*3+2];
-    const a=localPts[i0], b=localPts[i1], c=localPts[i2];
-    edgeLens.push(Math.hypot(b.x-a.x,b.z-a.z), Math.hypot(c.x-b.x,c.z-b.z), Math.hypot(a.x-c.x,a.z-c.z));
+  const sp=v=>{setProxy(v);localStorage.setItem('geosampa_proxy',v);};
+  const lg=(t,m)=>{
+    const ts=new Date().toLocaleTimeString('pt-BR',{hour12:false});
+    setLogs(p=>[...p,{t,m,ts}].slice(-400));
+  };
+  useEffect(()=>{if(logEl.current)logEl.current.scrollTop=logEl.current.scrollHeight;},[logs]);
+
+  // Fase "busy" = está processando algo
+  const phIdx=p=>PHASES.indexOf(p);
+  const busy=['selecting','scanning','fetching','tinning','patching'].includes(phase);
+
+  function bdg(phases){
+    const cur=phIdx(phase);
+    if(phases.some(p=>p===phase)) return'bdg b-act';
+    if(phases.every(p=>cur>phIdx(p))) return'bdg b-done';
+    return'bdg b-idle';
   }
-  edgeLens.sort((a,b) => a-b);
-  const maxEdge = edgeLens[Math.floor(edgeLens.length*0.5)] * 2.5;
 
-  // Montar índices filtrados (sem re-indexar — mantém todos os vértices)
-  const filtIdx = [];
-  let removed = 0;
-  for (let t = 0; t < rawTris; t++) {
-    const i0=delaunay.triangles[t*3], i1=delaunay.triangles[t*3+1], i2=delaunay.triangles[t*3+2];
-    const a=localPts[i0], b=localPts[i1], c=localPts[i2];
-    if (Math.hypot(b.x-a.x,b.z-a.z)<=maxEdge && Math.hypot(c.x-b.x,c.z-b.z)<=maxEdge && Math.hypot(a.x-c.x,a.z-c.z)<=maxEdge) {
-      filtIdx.push(i0, i1, i2);
-    } else removed++;
-  }
-  const nTris = filtIdx.length / 3;
-  log('ok', `Delaunator: ${rawTris} brutos → ${nTris} filtrados (${removed} removidos)`);
-  stats['Triângulos'] = nTris;
-  if (nTris === 0) throw new Error('Todos removidos. Aumente o buffer.');
-
-  // ── 3. Montar buffers ────────────────────────────────────────────
-  const nV = localPts.length;
-  const vBuf = new Float32Array(nV * 3);
-  let xn=Infinity,xx=-Infinity,yn=Infinity,yx=-Infinity,zn=Infinity,zx=-Infinity;
-  for (let i = 0; i < nV; i++) {
-    const {x,y,z} = localPts[i];
-    vBuf[i*3]=x; vBuf[i*3+1]=y; vBuf[i*3+2]=z;
-    if(x<xn)xn=x;if(x>xx)xx=x;if(y<yn)yn=y;if(y>yx)yx=y;if(z<zn)zn=z;if(z>zx)zx=z;
-  }
-  log('ok', `BBox: X[${xn.toFixed(0)}..${xx.toFixed(0)}] Y[${yn.toFixed(1)}..${yx.toFixed(1)}] Z[${zn.toFixed(0)}..${zx.toFixed(0)}]`);
-  stats['Desnível mesh'] = `${yn.toFixed(1)} – ${yx.toFixed(1)} m`;
-
-  const u16 = nV <= 65535;
-  const iCnt = filtIdx.length;
-  const iBytes = iCnt * (u16 ? 2 : 4);
-  const iBuf = u16 ? new Uint16Array(iCnt) : new Uint32Array(iCnt);
-  for (let i = 0; i < iCnt; i++) iBuf[i] = filtIdx[i];
-
-  const iPad = Math.ceil(iBytes/4)*4;
-  const vOff = iPad;
-  const binLen = vOff + nV*3*4;
-
-  // ── 4. JSON glTF ─────────────────────────────────────────────────
-  // Rotação ao redor do eixo Y (vertical) para alinhar norte
-  // Quaternion Y-rotation: [0, sin(θ/2), 0, cos(θ/2)]
-  const rotRad = rotDeg * Math.PI / 180;
-  const qY = [0, Math.sin(rotRad/2), 0, Math.cos(rotRad/2)];
-
-  const gj = {
-    asset:{version:"2.0",generator:"KV-GeoSampa"},
-    scene:0, scenes:[{nodes:[0]}],
-    nodes:[{mesh:0, name:"Relevo_GeoSampa", rotation:qY}],
-    meshes:[{primitives:[{attributes:{POSITION:1},indices:0,material:0,mode:4}]}],
-    materials:[{pbrMetallicRoughness:{baseColorFactor:[.29,.49,.35,1],metallicFactor:0,roughnessFactor:.9},doubleSided:true,name:"Terreno"}],
-    accessors:[
-      {bufferView:0,componentType:u16?5123:5125,count:iCnt,type:"SCALAR",max:[nV-1],min:[0]},
-      {bufferView:1,componentType:5126,count:nV,type:"VEC3",max:[xx,yx,zx],min:[xn,yn,zn]},
-    ],
-    bufferViews:[
-      {buffer:0,byteOffset:0,byteLength:iBytes,target:34963},
-      {buffer:0,byteOffset:vOff,byteLength:nV*3*4,target:34962},
-    ],
-    buffers:[{byteLength:binLen}],
+  // ─── Passo 1: Selecionar terreno ──────────────────────────────
+  const doSel=async()=>{
+    if(!proxy.trim()){lg('err','Configure o proxy primeiro.');return;}
+    setPhase('selecting');
+    lg('info','Clique em um polígono no mapa do Giraffe...');
+    try{
+      const ss=await rpc.invoke('pickRawSections',[]);
+      if(!ss?.length) throw new Error('Nenhum elemento clicado');
+      const poly=ss.find(s=>['Polygon','MultiPolygon'].includes(s.geometry?.type));
+      if(!poly) throw new Error('O elemento clicado não é um polígono');
+      const bfrd=turf.buffer({type:'Feature',geometry:poly.geometry},buf,{units:'meters'});
+      setGeo({geom:poly.geometry,bbox:turf.bbox(bfrd),bgeom:bfrd.geometry});
+      setScan({});setTin(null);setStats(null);
+      setPhase('ready_scan');
+      lg('ok',`Polígono capturado — buffer ${buf} m aplicado.`);
+    }catch(e){lg('err',e.message);setPhase('idle');}
   };
 
-  // ── 5. Montar GLB ────────────────────────────────────────────────
-  const js = JSON.stringify(gj);
-  const jp = js + ' '.repeat((4-(js.length%4))%4);
-  const jb = new TextEncoder().encode(jp);
-  const tot = 12 + 8+jb.length + 8+binLen;
-  const glb = new ArrayBuffer(tot);
-  const dv = new DataView(glb);
-  const u8 = new Uint8Array(glb);
-  let o = 0;
-  dv.setUint32(o,0x46546C67,true);o+=4;
-  dv.setUint32(o,2,true);o+=4;
-  dv.setUint32(o,tot,true);o+=4;
-  dv.setUint32(o,jb.length,true);o+=4;
-  dv.setUint32(o,0x4E4F534A,true);o+=4;
-  u8.set(jb,o);o+=jb.length;
-  dv.setUint32(o,binLen,true);o+=4;
-  dv.setUint32(o,0x004E4942,true);o+=4;
-  const bin = new Uint8Array(binLen);
-  bin.set(new Uint8Array(iBuf.buffer),0);
-  bin.set(new Uint8Array(vBuf.buffer),vOff);
-  u8.set(bin,o);
-  log('ok', `GLB: ${(tot/1024).toFixed(1)}KB · ${nV} verts · ${nTris} tris`);
-  return Promise.resolve(new Blob([glb], {type:'model/gltf-binary'}));
-}
-
-
-// Download automático
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// ESTADO
-// ═══════════════════════════════════════════════════════════════════════
-let baseBbox = null, bufM = 150, exagZ = 3, rotDeg = 0, busy = false;
-
-// ═══════════════════════════════════════════════════════════════════════
-// UI
-// ═══════════════════════════════════════════════════════════════════════
-window.ST     = id => { document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id)); document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===`panel-${id}`)); };
-window.updBuf = v  => { bufM=parseInt(v); document.getElementById('bufVal').textContent=`${v} m`; if(baseBbox)showBbox(); };
-window.updZ   = v  => { exagZ=parseInt(v); document.getElementById('zVal').textContent=`${v}×`; };
-window.updRot = v  => { rotDeg=parseInt(v); document.getElementById('rotVal').textContent=`${v}°`; };
-window.clrLog = ()  => { document.getElementById('logWrap').innerHTML=''; };
-
-function setSt(c,m) { document.getElementById('dot').className=`dot ${c}`; const t=document.getElementById('stTxt'); t.className=`ptxt ${c}`; t.textContent=m; }
-function log(type,msg) { const w=document.getElementById('logWrap'); const e=document.createElement('div'); e.className=`le ${type}`; e.innerHTML=`<span class="lt">${new Date().toLocaleTimeString('pt-BR')}</span><span>${msg}</span>`; w.prepend(e); while(w.children.length>300)w.removeChild(w.lastChild); }
-function showBbox() { const b=expandBbox(baseBbox,bufM); ['bW','bS','bE','bN'].forEach((id,i)=>document.getElementById(id).textContent=[b.minX,b.minY,b.maxX,b.maxY][i].toFixed(6)); }
-
-// ═══════════════════════════════════════════════════════════════════════
-// ENTRADA
-// ═══════════════════════════════════════════════════════════════════════
-window.pickAndRun = async () => {
-  if (busy) return;
-  if (!proxy) { setSt('err','⚠ Configure o Proxy.'); window.ST('prx'); return; }
-  setSt('run','Clique em uma geometria no mapa...');
-  try {
-    const secs = await rpc.invoke('pickRawSections',[]);
-    if (!secs?.length) { setSt('idle','Nada selecionado.'); return; }
-    let bbox=null; for(const f of secs) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f));
-    if (!bbox) { setSt('err','Geometria sem coordenadas.'); return; }
-    baseBbox=bbox; showBbox();
-    log('ok',`Terreno: ${secs.length} feição(ões)`);
-    await pipeline();
-  } catch(e) { setSt('err',e.message); log('er',e.message); }
-};
-
-window.runFromSel = async () => {
-  if (busy) return;
-  if (!proxy) { setSt('err','⚠ Configure o Proxy.'); window.ST('prx'); return; }
-  let bbox=null;
-  try { const s=await rpc.invoke('getSelectedFeatures',[]); if(s?.length) for(const f of s) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f)); } catch(e) {}
-  if (!bbox) { try { const r=giraffeState.get('rawSections'); if(r?.features?.length) for(const f of r.features) if(f.geometry) bbox=mergeBbox(bbox,featureBbox(f)); } catch(e) {} }
-  if (!bbox) { setSt('err','Nenhuma seleção.'); return; }
-  baseBbox=bbox; showBbox();
-  await pipeline();
-};
-
-// ═══════════════════════════════════════════════════════════════════════
-// PIPELINE
-// ═══════════════════════════════════════════════════════════════════════
-async function pipeline() {
-  busy = true;
-  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
-  document.getElementById('statsBox').style.display = 'none';
-  const stats = {};
-  const bbox = expandBbox(baseBbox, bufM);
-
-  try {
-    // ── ① BAIXANDO DADOS ───────────────────────────────────────────
-    setSt('run','① Baixando pontos cotados + curvas...');
-
-    let pontoFC  = {type:'FeatureCollection',features:[]};
-    let mestraFC = {type:'FeatureCollection',features:[]};
-    let interFC  = {type:'FeatureCollection',features:[]};
-
-    try {
-      pontoFC = await fetchWFS(LAYER_PONTO, bbox, 2000, 50000);
-      log('ok',`ponto_cotado: ${pontoFC.features.length} feições`);
-    } catch(e) { log('wn',`ponto_cotado: ${e.message}`); }
-
-    try {
-      mestraFC = await fetchWFS(LAYER_MESTRA, bbox, 500, 45000);
-      log('ok',`curva_mestra: ${mestraFC.features.length} feições`);
-    } catch(e) { log('wn',`curva_mestra: ${e.message}`); }
-
-    try {
-      interFC = await fetchWFS(LAYER_INTER, bbox, 600, 45000);
-      log('ok',`curva_intermediaria: ${interFC.features.length} feições`);
-    } catch(e) { log('wn',`curva_intermediaria: ${e.message}`); }
-
-    // ── ② COLETANDO PONTOS 3D ─────────────────────────────────────
-    setSt('run','② Coletando pontos com altitude...');
-    const rawPts = collectPoints(pontoFC, mestraFC, interFC);
-    stats['Pontos brutos'] = rawPts.length;
-
-    if (rawPts.length < 3) throw new Error('Menos de 3 pontos com altitude. Verifique proxy/buffer.');
-
-    const alts = rawPts.map(p => p.alt);
-    const altMin = Math.min(...alts), altMax = Math.max(...alts);
-    stats['Alt mín (m)'] = altMin.toFixed(1);
-    stats['Alt máx (m)'] = altMax.toFixed(1);
-    stats['Desnível (m)'] = (altMax - altMin).toFixed(1);
-    stats['Exagero Z'] = `${exagZ}×`;
-    log('ok',`Altitudes: ${altMin.toFixed(1)} – ${altMax.toFixed(1)} m · desnível ${(altMax-altMin).toFixed(1)} m`);
-
-    // ── ③ CONVERTENDO PARA METROS LOCAIS ──────────────────────────
-    setSt('run','③ Convertendo para coordenadas locais...');
-    const centerLng = (bbox.minX + bbox.maxX) / 2;
-    const centerLat = (bbox.minY + bbox.maxY) / 2;
-    const datum = altMin;
-    const localPts = toLocalMeters(rawPts, centerLng, centerLat, datum, exagZ);
-    log('ok',`Origem: (${centerLng.toFixed(6)}, ${centerLat.toFixed(6)}) · datum ${datum.toFixed(1)} m`);
-
-    // ── ④ TRIANGULAÇÃO (DELAUNATOR) ───────────────────────────────
-    setSt('run','④ Calculando Triangulação (Delaunator)...');
-
-    // ── ⑤ EXPORTANDO GLB ──────────────────────────────────────────
-    setSt('run','⑤ Exportando GLB (Three.js)...');
-    const blob = await buildAndExportGLB(localPts, stats);
-    const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
-    const sizeKB = (blob.size / 1024).toFixed(0);
-    stats['Arquivo'] = blob.size > 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
-    log('ok',`Arquivo gerado: ${blob.size > 1048576 ? sizeMB+' MB' : sizeKB+' KB'}`);
-
-    if (blob.size < 100) {
-      log('er','⚠ Arquivo muito pequeno — pode estar vazio. Verifique os logs acima.');
-      throw new Error('Arquivo GLB gerado é muito pequeno (< 100 bytes). Geometria pode estar inválida.');
+  // ─── Passo 2: Escanear camadas ────────────────────────────────
+  const doScan=async()=>{
+    if(!geo||!proxy||busy) return;
+    setPhase('scanning');setScan({});setPct(0);
+    lg('info','Escaneando camadas de curva de nível no GeoSampa...');
+    const ns={};
+    for(let i=0;i<LAYERS.length;i++){
+      const L=LAYERS[i];
+      lg('info',`Verificando ${L.lb}...`);
+      try{
+        const fc=await fetchWFS({proxy,tn:L.tn,bbox:geo.bbox,max:1,ms:12000});
+        const ok=(fc?.features?.length??0)>0;
+        ns[L.id]=ok?'found':'empty';
+        lg(ok?'ok':'warn',`${L.lb}: ${ok?'✓ dados presentes':'∅ sem dados'}`);
+      }catch(e){
+        ns[L.id]='err';
+        lg('warn',`${L.lb}: ${e.message.slice(0,60)}`);
+      }
+      setPct(Math.round((i+1)/LAYERS.length*100));
     }
+    setScan(ns);
+    const found=Object.values(ns).filter(v=>v==='found').length;
+    if(!found){
+      lg('err','Nenhuma camada com dados. Tente um buffer maior.');
+      setPhase('ready_scan');
+    }else{
+      lg('ok',`${found} camada(s) com dados encontrada(s).`);
+      setPhase('ready_gen');
+    }
+  };
 
-    // ── ⑥ DOWNLOAD ───────────────────────────────────────────────
-    const ext = blob.type.includes('json') ? '.gltf' : '.glb';
-    downloadBlob(blob, `relevo_geosampa${ext}`);
-    log('ok',`✓ Download iniciado: relevo_geosampa${ext}`);
+  // ─── Passo 3a: Calcular TIN (preview e preparação) ────────────
+  const doCalcTIN=async()=>{
+    const fnd=LAYERS.filter(L=>scan[L.id]==='found');
+    if(!geo||!proxy||!fnd.length||busy) return;
+    setPhase('fetching');setPct(0);setStats(null);
+    lg('info','━━ Calculando mesh TIN das curvas de nível ━━');
+    try{
+      // Fetch das curvas com dados
+      const fcs=[];
+      for(let i=0;i<fnd.length;i++){
+        const L=fnd[i];
+        lg('info',`Baixando ${L.lb}...`);
+        const fc=await fetchWFS({proxy,tn:L.tn,bbox:geo.bbox,max:3000,ms:50000});
+        const n=fc?.features?.length??0;
+        lg('ok',`${L.lb}: ${n} feições`);
+        if(n>0) fcs.push(fc);
+        setPct(Math.round((i+1)/fnd.length*50));
+      }
 
-    // ── ⑦ INFO DE POSICIONAMENTO PARA O GIRAFFE ─────────────────
-    // O GLB usa coordenadas locais em metros (origem = centro da BBOX).
-    // Para alinhar no Giraffe, o usuário precisa posicionar o modelo
-    // no ponto central e rotacionar para alinhar com o norte.
-    stats['Centro (lng)'] = centerLng.toFixed(6);
-    stats['Centro (lat)'] = centerLat.toFixed(6);
-    stats['Datum (m)'] = datum.toFixed(1);
-    stats['Rotação norte'] = `${rotDeg}°`;
+      // Amostrar pontos de elevação
+      setPhase('tinning');
+      lg('info','Extraindo pontos de elevação (cd_numero_isovalor)...');
+      const pts=samplePoints(fcs);
+      if(pts.length<8) throw new Error(
+        `Pontos insuficientes (${pts.length}). `
+        +'Verifique se as curvas têm o campo cd_numero_isovalor preenchido.');
 
-    log('ok','──────────────────────────────────────');
-    log('ok',`📍 CENTRO: ${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`);
-    log('ok',`🧭 Eixos: +X=Leste · Y=Altitude · -Z=Norte`);
-    log('ok',`🔄 Rotação norte: ${rotDeg}°`);
-    log('ok',`📏 Escala: 1 unidade = 1 metro · Exagero Z = ${exagZ}×`);
-    log('ok',`⛰ Datum: ${datum.toFixed(1)}m (Y=0 = ${datum.toFixed(1)}m real)`);
-    log('ok','──────────────────────────────────────');
-    log('in','Se o modelo aparecer girado no Giraffe:');
-    log('in','  → Ajuste o slider Rotação ° e gere novamente');
+      const elevs=pts.map(p=>p.elev);
+      const eMin=Math.min(...elevs),eMax=Math.max(...elevs);
+      const datum=eMin; // zero relativo = menor elevação da área
+      lg('ok',`${pts.length} pts de controle | ${eMin} → ${eMax} m | datum=${datum} m`);
+      setPct(65);
 
-    // Stats
-    const grid = document.getElementById('statsGrid');
-    grid.innerHTML = '';
-    for (const [k,v] of Object.entries(stats))
-      grid.innerHTML += `<div class="sc"><div class="sc-l">${k}</div><div class="sc-v">${v}</div></div>`;
-    document.getElementById('statsBox').style.display = 'block';
+      // Triangulação
+      lg('info','Triangulando TIN (Delaunay)...');
+      const tinResult=await buildTIN(pts,datum);
+      const ntri=tinResult.features.length;
+      if(!ntri) throw new Error('Nenhum triângulo válido gerado.');
+      setTin(tinResult);
+      lg('ok',`TIN: ${ntri} triângulos com alturas por vértice`);
+      setPct(85);
 
-    setSt('ok','✓ relevo_geosampa.glb baixado! Arraste para o Giraffe.');
+      // Preview temporário (fill-extrusion para visualização rápida)
+      lg('info','Gerando preview temporário no mapa...');
+      const maxH=eMax-datum;
+      const cex=['interpolate',['linear'],['get','height'],
+        0,'#1a3a28', maxH*.15,'#1d6347', maxH*.35,'#25a265',
+        maxH*.55,'#6ec97e', maxH*.75,'#c8e6a0', maxH,'#f0ede2'];
+      try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
+      await rpc.invoke('addTempLayerGeoJSON',[
+        PREVIEW_ID,tinResult,
+        {type:'fill-extrusion',paint:{
+          'fill-extrusion-color':cex,
+          'fill-extrusion-height':['get','height'],
+          'fill-extrusion-base':0,'fill-extrusion-opacity':0.88,
+        }}
+      ]);
 
-  } catch(err) {
-    setSt('err', err.message);
-    log('er', `Erro: ${err.message}`);
-    console.error(err);
-  } finally {
-    busy = false;
-    document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
-  }
+      setPct(100);
+      setStats({eMin,eMax,dnivel:eMax-eMin,datum,ntri,npts:pts.length});
+      lg('ok','Preview visível. Clique em "Fixar Patches" para criar objetos editáveis.');
+      setPhase('ready_patch');
+    }catch(e){
+      lg('err',`Erro: ${e.message}`);
+      setPhase('ready_gen');setPct(0);
+    }
+  };
+
+  // ─── Passo 3b: Fixar como patches editáveis ────────────────────
+  // Cria um Drawing Layer e importa os triângulos como raw sections patch
+  const doFixar=async()=>{
+    if(!tin||phase!=='ready_patch'||busy) return;
+    setPhase('patching');setPct(0);
+    lg('info','━━ Criando patches editáveis no Giraffe ━━');
+    try{
+      // 1. Criar drawing layer dedicado
+      lg('info',`Criando layer "${LAYER_NAME}"...`);
+      await rpc.invoke('createDrawingLayer',[LAYER_NAME]);
+      await rpc.invoke('activateDrawingLayer',[LAYER_NAME]);
+      lg('ok',`Layer "${LAYER_NAME}" criado e ativado.`);
+      setPct(20);
+
+      // 2. Converter TIN para raw sections com propriedade patch
+      const patches=tinToPatches(tin);
+      lg('info',`Inserindo ${patches.length} patches no projeto...`);
+      setPct(35);
+
+      // createRawSections aceita array de features em uma só chamada
+      await rpc.invoke('createRawSections',[patches]);
+      setPct(90);
+
+      // 3. Remover preview temporário (patches são o resultado final)
+      try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
+
+      setPct(100);
+      lg('ok',`✓ ${patches.length} patches criados no layer "${LAYER_NAME}"!`);
+      lg('ok','O terreno é agora editável — cada triângulo pode ser ajustado individualmente.');
+      setPhase('done');
+    }catch(e){
+      lg('err',`Erro ao criar patches: ${e.message}`);
+      setPhase('ready_patch'); // mantém o preview e permite tentar de novo
+      setPct(0);
+    }
+  };
+
+  // ─── Limpar ────────────────────────────────────────────────────
+  const doClear=async()=>{
+    try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
+    setGeo(null);setScan({});setTin(null);setPhase('idle');
+    setPct(0);setStats(null);setLogs([]);
+  };
+
+  const hasGeo=!!geo;
+  const hasFnd=Object.values(scan).some(v=>v==='found');
+  const canScan=hasGeo&&!busy&&['ready_scan','ready_gen','ready_patch','done'].includes(phase);
+  const canGen=hasGeo&&hasFnd&&!busy&&['ready_gen','ready_patch','done'].includes(phase);
+  const canPatch=!!tin&&!busy&&phase==='ready_patch';
+  const isBusy2=['fetching','tinning'].includes(phase);
+  const isPatch=phase==='patching';
+
+  return h('div',{style:{display:'flex',flexDirection:'column',height:'100%',padding:'9px',gap:'7px',overflow:'hidden'}},
+
+    // Header
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+      h('div',null,
+        h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#2a2a2a',textTransform:'uppercase'}},'KV Arquitetos'),
+        h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D')
+      ),
+      hasGeo&&h('button',{className:'btn btn-gh',style:{fontSize:'10px',padding:'3px 8px'},
+        onClick:doClear,disabled:busy},'✕ limpar')
+    ),
+
+    // Config
+    h('div',{className:'card'},
+      h('p',{style:{fontSize:'9px',letterSpacing:'1.5px',color:'#222',textTransform:'uppercase',marginBottom:'7px'}},'Configuração'),
+      h('div',{style:{display:'flex',gap:'5px',alignItems:'center',marginBottom:'5px'}},
+        h('span',{style:{fontSize:'10px',color:'#3a3a3a',width:'36px',flexShrink:0}},'Proxy'),
+        h('input',{className:'fld',style:{flex:1},
+          placeholder:'https://…workers.dev',value:proxy,onChange:e=>sp(e.target.value)})
+      ),
+      h('div',{style:{display:'flex',gap:'5px',alignItems:'center'}},
+        h('span',{style:{fontSize:'10px',color:'#3a3a3a',width:'36px',flexShrink:0}},'Buffer'),
+        h('input',{className:'fld',type:'number',min:0,max:1000,
+          style:{width:'52px',textAlign:'center'},value:buf,onChange:e=>setBuf(Number(e.target.value))}),
+        h('span',{style:{fontSize:'10px',color:'#2a2a2a'}},' m')
+      )
+    ),
+
+    // Passo 1 — Selecionar
+    h('div',{className:'card'},
+      h('div',{style:{display:'flex',alignItems:'center',gap:'7px',marginBottom:'6px'}},
+        h('span',{className:bdg(['idle','selecting'])},'1'),
+        h('span',{style:{fontSize:'12px',fontWeight:600}},'Selecionar Terreno')
+      ),
+      hasGeo
+        ?h('p',{style:{fontSize:'10px',color:'#4ade80'}},`✓  Polígono capturado — buffer de ${buf} m`)
+        :h('button',{className:'btn btn-pri',style:{width:'100%'},
+            onClick:doSel,disabled:busy||!proxy.trim()},
+            phase==='selecting'?'⏳  Aguardando clique no mapa...':'🖱  Clicar em um polígono no mapa')
+    ),
+
+    // Passo 2 — Escanear
+    h('div',{className:'card'},
+      h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'7px'}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:'7px'}},
+          h('span',{className:bdg(['ready_scan','scanning'])},'2'),
+          h('span',{style:{fontSize:'12px',fontWeight:600}},'Escanear Camadas')
+        ),
+        h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'4px 10px'},
+          onClick:doScan,disabled:!canScan},
+          phase==='scanning'?'⏳':'⚡ Escanear')
+      ),
+      h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px',
+        marginBottom:phase==='scanning'?'6px':'0'}},
+        ...LAYERS.map(L=>{
+          const s=scan[L.id];
+          return h('div',{key:L.id,className:`chip ${!s?'ch-pend':s==='found'?'ch-found':'ch-empty'}`},
+            h('span',{style:{fontSize:'10px',fontWeight:500,color:s==='found'?L.col:'#2a2a2a'}},L.lb),
+            h('span',{style:{fontSize:'9px',color:'#333'}},!s?'—':s==='found'?'✓':s==='empty'?'∅':'✗')
+          );
+        })
+      ),
+      phase==='scanning'&&h('div',{className:'pb'},h('div',{className:'pf',style:{width:`${pct}%`}}))
+    ),
+
+    // Passo 3 — Gerar + Fixar
+    h('div',{className:'card'},
+      h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',
+        marginBottom:stats?'8px':'0'}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:'7px'}},
+          h('span',{className:bdg(['ready_gen','fetching','tinning','ready_patch','patching'])},'3'),
+          h('span',{style:{fontSize:'12px',fontWeight:600}},'Gerar Terreno')
+        ),
+        // Botões: Calcular TIN | Fixar Patches
+        h('div',{style:{display:'flex',gap:'5px'}},
+          h('button',{className:'btn btn-pri',style:{fontSize:'10px',padding:'4px 10px'},
+            onClick:doCalcTIN,disabled:!canGen},
+            isBusy2?'⏳':'▶ Calcular'),
+          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'4px 10px'},
+            title:'Cria patches 3D editáveis no projeto Giraffe',
+            onClick:doFixar,disabled:!canPatch},
+            isPatch?'⏳ Fixando...':'📌 Fixar Patches')
+        )
+      ),
+
+      // Barra de progresso
+      (isBusy2||isPatch)&&h('div',{className:'pb',style:{marginTop:'6px'}},
+        h('div',{className:'pf',style:{width:`${pct}%`}})),
+
+      // Legenda das fases quando TIN calculado
+      phase==='ready_patch'&&!stats&&null,
+      phase==='ready_patch'&&h('p',{style:{fontSize:'9px',color:'#00ACCD',marginTop:'5px'}},
+        '● Preview visível. "Fixar Patches" cria objetos 3D editáveis no projeto.'),
+
+      // Estatísticas
+      stats&&h('div',{className:'sg',style:{marginTop:'7px'}},
+        h('span',{className:'sk'},'Elev. mínima'), h('span',{className:'sv'},`${stats.eMin} m s.n.m.`),
+        h('span',{className:'sk'},'Elev. máxima'), h('span',{className:'sv'},`${stats.eMax} m s.n.m.`),
+        h('span',{className:'sk'},'Desnível'),      h('span',{className:'sv'},`${stats.dnivel} m`),
+        h('span',{className:'sk'},'Datum (zero)'),  h('span',{className:'sv'},`${stats.datum} m s.n.m.`),
+        h('span',{className:'sk'},'Triâng. TIN'),   h('span',{className:'sv'},stats.ntri.toLocaleString('pt-BR')),
+        h('span',{className:'sk'},'Pts controle'),  h('span',{className:'sv'},stats.npts.toLocaleString('pt-BR')),
+        phase==='done'&&h('span',{className:'sk'},'Layer'),
+        phase==='done'&&h('span',{className:'sv'},LAYER_NAME),
+      )
+    ),
+
+    // Log
+    h('div',{className:'lg',ref:logEl,style:{flex:1,minHeight:'50px'}},
+      logs.length===0
+        ?h('span',{style:{color:'#181818'}},'Pronto.')
+        :logs.map((l,i)=>h('div',{key:i},
+          h('span',{className:'lt'},[`[${l.ts}] `]),
+          h('span',{className:`l${l.t[0]}`},l.m)
+        ))
+    )
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// ERRO GLOBAL
-// ═══════════════════════════════════════════════════════════════════════
-window.onerror = (msg, src, line, col, err) => {
-  log('er', `[${line}:${col}] ${msg}`);
-  setSt('err', msg);
-};
-
-// ═══════════════════════════════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════════════════════════════
-loadProxy();
-log('ok','SDK pronto · KV Arquitetos · Relevo 3D → GLB');
-log('in','Delaunator · Turf.js · GLB builder manual');
+createRoot(document.getElementById('root')).render(h(App,null));
 </script>
 </body>
 </html>
