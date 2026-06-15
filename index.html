@@ -281,7 +281,7 @@ const CURVAS_PERM_NAME='Curvas de Nível · GeoSampa';
 // ══════════════════════════════════════════════════════════════
 function App(){
   const[proxy,setProxy]=useState(()=>{const v=localStorage.getItem('geosampa_proxy')||'';_proxy=v;return v;});
-  const[buf,setBuf]=useState(150);
+  const[buf,setBuf]=useState(300);
   const[geo,setGeo]=useState(null);   // {geom, bbox:[x0,y0,x1,y1], wkt}
   const[scan,setScan]=useState({});   // {id:'found'|'empty'|'err'}
   const[fcs,setFcs]=useState(null);   // FeatureCollections das curvas fetched
@@ -333,14 +333,22 @@ function App(){
   // ─── 2. Escanear ────────────────────────────────────────────
   const doScan=async()=>{
     if(!geo||busy) return;
-    setPhase('scan');setScan({});setFcs(null);setTin(null);setPct(0);
+    // NÃO limpa fcs/tin/stats aqui — só atualiza scan status
+    // fcs e tin só são limpos em doSel (nova seleção de terreno)
+    setPhase('scan');setScan({});setPct(0);
     lg('info','Escaneando camadas de curva de nível...');
     const ns={};
     for(let i=0;i<LAYERS.length;i++){
       const L=LAYERS[i];
       lg('info',`Verificando ${L.lb}...`);
       try{
-        const fc=geo.wkt?await fetchByGeom(L.tn,geo.wkt,1,12000):await fetchWFS(L.tn,...geo.bbox,1,12000);
+        // Tenta INTERSECTS (fetchByGeom, com detecção de coluna) — mais preciso
+        // Se falhar por qualquer motivo, cai no BBOX puro como fallback
+        let fc;
+        try{
+          fc=geo.wkt?await fetchByGeom(L.tn,geo.wkt,1,12000):null;
+        }catch(_){fc=null;}
+        if(!fc) fc=await fetchWFS(L.tn,...geo.bbox,1,12000);
         const ok=(fc?.features?.length??0)>0;
         ns[L.id]=ok?'found':'empty';
         lg(ok?'ok':'warn',`${L.lb}: ${ok?'✓':'∅ sem dados'}`);
@@ -507,24 +515,25 @@ function App(){
       setPct(15);
 
       const created=await rpc.invoke('createRawSections',[plainSections]);
-      lg('info',`createRawSections retornou: ${Array.isArray(created)?`array[${created.length}]`:typeof created}`);
+      lg('info',`createRawSections retornou: ${Array.isArray(created)?`array[${created.length}], tipo: ${typeof created[0]}`:`${typeof created}`}`);
 
-      // Verifica se recebemos os IDs de volta
-      if(!Array.isArray(created)||!created.length||!created[0]?.properties?.id){
-        throw new Error(
-          `createRawSections não retornou seções com ID. `
-          +`Retornou: ${JSON.stringify(created)?.slice(0,120)}`
-        );
+      // createRawSections retorna string[] (array de IDs), não RawSection[]
+      if(!Array.isArray(created)||!created.length){
+        throw new Error(`createRawSections retornou vazio ou inválido: ${JSON.stringify(created)?.slice(0,80)}`);
       }
-      lg('ok',`${created.length} seções criadas. IDs capturados.`);
+
+      // Normaliza para array de strings (suporta tanto string[] quanto object[])
+      const ids=created.map(item=>typeof item==='string'?item:item?.properties?.id??item?.id);
+      if(!ids[0]) throw new Error(`ID não encontrado no retorno: ${JSON.stringify(created[0])?.slice(0,80)}`);
+      lg('ok',`${ids.length} seções criadas. IDs capturados (ex: ${ids[0]}).`);
       setPct(55);
 
       // ── Passo 2: updateRawSections aplicando patch[] por vértice ─────────────
       // patch[i] = altura em metros do vértice i (sem o ponto de fechamento)
       // patchType:'slab' = superfície inclinada interpolada por vértice
-      const patchUpdates=created.map((sec,i)=>({
+      const patchUpdates=ids.map((id,i)=>({
         properties:{
-          id:sec.properties.id,
+          id,
           patch:[
             parseFloat(tinFeats[i].properties.ha.toFixed(4)),
             parseFloat(tinFeats[i].properties.hb.toFixed(4)),
