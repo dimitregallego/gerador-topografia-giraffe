@@ -367,20 +367,27 @@ function App(){
     try{
       const ss=await rpc.invoke('pickRawSections',[]);
       if(!ss?.length) throw new Error('Nenhum elemento clicado');
-      // Pega apenas o polígono clicado (ss.find = primeiro match = elemento selecionado)
-      // Não usar ss.filter + mergeToSinglePolygon — retornaria todos os polígonos do mapa
       const poly=ss.find(s=>['Polygon','MultiPolygon'].includes(s.geometry?.type));
       if(!poly) throw new Error('O elemento clicado não é um polígono');
-      // Buffer suave igual ao GeoSampa import (steps:16, unidade km)
-      const fc={type:'FeatureCollection',features:[{type:'Feature',geometry:poly.geometry,properties:{}}]};
-      const bfrd=turf.buffer(fc,buf/1000,{units:'kilometers',steps:16});
-      const bfrdGeom=bfrd?.features?.[0]?.geometry||poly.geometry;
-      const[x0,y0,x1,y1]=turf.bbox({type:'Feature',geometry:bfrdGeom});
+      // Log do primeiro vértice do polígono para confirmar que é o elemento correto
+      const firstCoord=poly.geometry.coordinates?.[0]?.[0];
+      if(firstCoord) lg('info',`Polígono[0]: lng=${firstCoord[0]?.toFixed(6)} lat=${firstCoord[1]?.toFixed(6)}`);
+      // Buffer simples — mesmo padrão que funcionava em V22/V23
+      const bfrd=turf.buffer(
+        {type:'Feature',geometry:poly.geometry,properties:{}},
+        buf,
+        {units:'meters'}
+      );
+      const bfrdGeom=bfrd?.geometry||poly.geometry;
+      const[x0,y0,x1,y1]=turf.bbox({type:'Feature',geometry:bfrdGeom,properties:{}});
       const wkt=geojsonToWKT(bfrdGeom);
+      // Log diagnóstico — confirma que bbox está sobre o polígono clicado
+      lg('info',`Bbox: lng [${x0.toFixed(5)} → ${x1.toFixed(5)}] lat [${y0.toFixed(5)} → ${y1.toFixed(5)}]`);
+      lg('info',`WKT gerado: ${wkt?wkt.slice(0,60)+'…':'FALHOU — usando bbox'}`);
       setGeo({geom:poly.geometry,bbox:[x0,y0,x1,y1],wkt});
       setScan({});setFcs(null);setTin(null);setStats(null);
       setPhase('r_scan');
-      lg('ok',`Polígono capturado. Buffer ${buf} m (steps:16) → bbox + WKT prontos.`);
+      lg('ok',`Polígono capturado. Buffer ${buf} m aplicado.`);
     }catch(e){lg('err',e.message);setPhase('idle');}
   };
 
@@ -680,7 +687,7 @@ function App(){
       h('div',null,
         h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#252525',textTransform:'uppercase'}},'KV Arquitetos'),
         h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D'),
-        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V26')
+        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V27')
       ),
       hasGeo&&h('button',{className:'btn btn-sm',onClick:doClear,disabled:busy},'✕ limpar')
     ),
