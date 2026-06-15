@@ -283,7 +283,7 @@ const CURVAS_PERM_NAME='Curvas de Nível · GeoSampa';
 // ══════════════════════════════════════════════════════════════
 function App(){
   const[proxy,setProxy]=useState(()=>{const v=localStorage.getItem('geosampa_proxy')||'';_proxy=v;return v;});
-  const[buf,setBuf]=useState(300);
+  const[buf,setBuf]=useState(75);
   const[geo,setGeo]=useState(null);   // {geom, bbox:[x0,y0,x1,y1], wkt}
   const[scan,setScan]=useState({});   // {id:'found'|'empty'|'err'}
   const[fcs,setFcs]=useState(null);   // FeatureCollections das curvas fetched
@@ -473,12 +473,12 @@ function App(){
         ]);
         lg('ok',`Curvas 3D adicionadas como layer temporário (${fc3d.features.length} feições)`);
       } else {
-        // Permanente: GeoJSON 2D padrão com cd_numero_isovalor preservado
-        // Mescla todos os FCs em um
-        const allFeats=fcs.flatMap(fc=>fc.features||[]);
+        // Permanente: GeoJSON 3D com alturas Z (mesmo padrão do temporário)
+        const fc3d=make3DContourFC(fcs,datum);
+        const allFeats=fc3d.features;
         const merged={type:'FeatureCollection',features:allFeats};
         await rpc.invoke('updateGeoJSONLayerContents',[CURVAS_PERM_NAME,merged]);
-        lg('ok',`Curvas importadas permanentemente: "${CURVAS_PERM_NAME}" (${allFeats.length} feições)`);
+        lg('ok',`Curvas 3D importadas permanentemente: "${CURVAS_PERM_NAME}" (${allFeats.length} feições)`);
       }
     }catch(e){
       lg('err',`Importação ${mode}: ${e.message}`);
@@ -597,7 +597,8 @@ function App(){
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
       h('div',null,
         h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#252525',textTransform:'uppercase'}},'KV Arquitetos'),
-        h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D')
+        h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D'),
+        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V22')
       ),
       hasGeo&&h('button',{className:'btn btn-sm',onClick:doClear,disabled:busy},'✕ limpar')
     ),
