@@ -475,41 +475,77 @@ function App(){
     }
   };
 
-  // ─── Fixar como patches editáveis ───────────────────────────
-  // Cópia do padrão editable do index.html: createRawSections direto, sem createDrawingLayer
+  // ─── Fixar como patches editáveis (fluxo 2 passos conforme docs Giraffe) ──
+  // Passo 1: createRawSections (polígonos simples) → captura IDs retornados
+  // Passo 2: updateRawSections com patch[] por vértice + patchType:'slab'
   const doFixar=async()=>{
     if(!tin||phase!=='r_patch'||busy) return;
     setPhase('patch');setPct(0);
-    lg('info','━━ Criando patches 3D editáveis no projeto ━━');
+    lg('info','━━ Criando patches 3D no projeto (2 passos) ━━');
     try{
-      // Converte triângulos TIN em raw sections com propriedade patch
-      // patch[i] = altura do vértice i em metros (alinhado à ordem dos vértices do polygon)
-      // patchType: 'slab' = formato nativo Giraffe para superfície inclinada por vértice
-      const patches=tin.features.map(f=>({
+      const tinFeats=tin.features;
+
+      // Diagnóstico de alturas antes de qualquer chamada
+      const allH=tinFeats.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
+      const hMin=Math.min(...allH),hMax=Math.max(...allH);
+      const nonZero=allH.filter(h=>h>0.01).length;
+      lg('info',`Alturas: min=${hMin.toFixed(2)} m | max=${hMax.toFixed(2)} m | ${nonZero}/${allH.length} vértices acima do datum`);
+      if(hMax<0.05) lg('warn','⚠ desnível <5 cm — área plana ou cd_numero_isovalor constante');
+
+      // ── Passo 1: criar polígonos planos (SEM patch para evitar erro no create) ─
+      const plainSections=tinFeats.map(f=>({
         type:'Feature',
-        geometry:f.geometry,
+        geometry:f.geometry,  // 2D [lng,lat] — patch define as alturas, não as coords
         properties:{
-          patch:[f.properties.ha,f.properties.hb,f.properties.hc],
+          stackOrder:0,
+          color:'#4ade80',
+          fillOpacity:0.8,
+          layerId:'default',
+        }
+      }));
+      lg('info',`Passo 1: criando ${plainSections.length} polígonos planos...`);
+      setPct(15);
+
+      const created=await rpc.invoke('createRawSections',[plainSections]);
+      lg('info',`createRawSections retornou: ${Array.isArray(created)?`array[${created.length}]`:typeof created}`);
+
+      // Verifica se recebemos os IDs de volta
+      if(!Array.isArray(created)||!created.length||!created[0]?.properties?.id){
+        throw new Error(
+          `createRawSections não retornou seções com ID. `
+          +`Retornou: ${JSON.stringify(created)?.slice(0,120)}`
+        );
+      }
+      lg('ok',`${created.length} seções criadas. IDs capturados.`);
+      setPct(55);
+
+      // ── Passo 2: updateRawSections aplicando patch[] por vértice ─────────────
+      // patch[i] = altura em metros do vértice i (sem o ponto de fechamento)
+      // patchType:'slab' = superfície inclinada interpolada por vértice
+      const patchUpdates=created.map((sec,i)=>({
+        properties:{
+          id:sec.properties.id,
+          patch:[
+            parseFloat(tinFeats[i].properties.ha.toFixed(4)),
+            parseFloat(tinFeats[i].properties.hb.toFixed(4)),
+            parseFloat(tinFeats[i].properties.hc.toFixed(4)),
+          ],
           patchType:'slab',
         }
       }));
+      lg('info',`Passo 2: aplicando patch heights em ${patchUpdates.length} seções...`);
+      lg('info',`  Exemplo patch[0]: [${patchUpdates[0].properties.patch.map(v=>v.toFixed(2)).join(', ')}]`);
+      setPct(70);
 
-      // Log do primeiro patch para verificar valores
-      lg('info',`Patch exemplo: patch=[${patches[0].properties.patch.map(v=>v.toFixed(2)).join(', ')}]`);
-      setPct(20);
+      await rpc.invoke('updateRawSections',[patchUpdates]);
+      setPct(95);
 
-      // Direto: createRawSections sem layer explícito (mesmo padrão do editable import)
-      lg('info',`Inserindo ${patches.length} patches via createRawSections...`);
-      await rpc.invoke('createRawSections',[patches]);
-
-      // Remove preview temporário após fixar
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
       setPct(100);
-      lg('ok',`✓ ${patches.length} patches com patchType "slab" criados!`);
-      lg('ok','Cada triângulo do terreno tem alturas independentes por vértice (ha, hb, hc).');
+      lg('ok',`✓ ${patchUpdates.length} patches 3D com altura por vértice aplicados!`);
       setPhase('done');
     }catch(e){
-      lg('err',`Erro ao criar patches: ${e.message}`);
+      lg('err',`Erro: ${e.message}`);
       setPhase('r_patch');setPct(0);
     }
   };
