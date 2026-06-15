@@ -465,25 +465,24 @@ function App(){
         ]);
         lg('ok',`Curvas 3D adicionadas como layer temporário (${fc3d.features.length} feições)`);
       } else {
-        // Permanente: raw sections com baseHeight = altura relativa ao datum
-        // Cada curva de nível é posicionada na sua cota correta no espaço 3D
-        const rawSections=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
+        // Permanente: updateGeoJSONLayerContents (cria layer visível no projeto)
+        // baseHeight adicionado como propriedade de cada feature para cota correta
+        const allFeats=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
           const elev=parseFloat(f.properties?.cd_numero_isovalor);
           const relH=isNaN(elev)?0:Math.max(0,elev-datum);
           return{
             type:'Feature',
-            geometry:f.geometry,   // LineString 2D original do GeoSampa
+            geometry:f.geometry,
             properties:{
-              baseHeight:relH,     // posiciona a linha na cota correta
-              stroke:'#00ACCD',
-              strokeWidth:1,
-              strokeOpacity:0.85,
+              ...f.properties,          // preserva cd_numero_isovalor e demais campos
+              _baseHeight:relH,         // cota relativa ao datum (nativa Giraffe)
+              baseHeight:relH,          // formato SDK
             }
           };
         }));
-        const r=await rpc.invoke('importRawSections',[rawSections]);
-        const n=Array.isArray(r)?r.length:rawSections.length;
-        lg('ok',`${n} curvas 3D criadas permanentemente (baseHeight por elevação)`);
+        const merged={type:'FeatureCollection',features:allFeats};
+        await rpc.invoke('updateGeoJSONLayerContents',[CURVAS_PERM_NAME,merged]);
+        lg('ok',`${allFeats.length} curvas importadas permanentemente em "${CURVAS_PERM_NAME}" (baseHeight por elevação)`);
       }
     }catch(e){
       lg('err',`Importação ${mode}: ${e.message}`);
