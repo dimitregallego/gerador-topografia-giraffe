@@ -65,6 +65,48 @@ import*as turf from'https://esm.sh/@turf/turf@6.5.0';
 const WFS_BASE='https://wfs.geosampa.prefeitura.sp.gov.br/geoserver/ows';
 let _proxy='';
 
+// ── Constantes geográficas (copiadas do index.html) ────────────
+const DEG_LAT=1/111320;
+const DEG_LNG=1/(111320*Math.cos(23.5*Math.PI/180));
+
+// BBOX a partir de uma feature GeoJSON (sem turf)
+function featureToBBOX(f){
+  const pts=[];
+  function walk(a,d){if(d===0){pts.push(a);return;}for(const x of a)walk(x,d-1);}
+  const D={Point:0,LineString:1,Polygon:2,MultiPoint:1,MultiLineString:2,MultiPolygon:3};
+  walk(f.geometry.coordinates,D[f.geometry.type]??2);
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const[x,y]of pts){if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;}
+  return{minX,minY,maxX,maxY};
+}
+
+// Expande BBOX em metros usando conversão de graus (copiado do index.html)
+function expandBBOX(b,m){
+  return{minX:b.minX-m*DEG_LNG,minY:b.minY-m*DEG_LAT,maxX:b.maxX+m*DEG_LNG,maxY:b.maxY+m*DEG_LAT};
+}
+
+// Mescla múltiplos polígonos em um só (copiado do index.html)
+function mergeToSinglePolygon(features){
+  if(!features.length) return null;
+  if(features.length===1) return features[0].geometry;
+  const polys=features
+    .filter(f=>f.geometry&&(f.geometry.type==='Polygon'||f.geometry.type==='MultiPolygon'))
+    .flatMap(f=>f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates);
+  if(!polys.length) return null;
+  if(polys.length===1) return{type:'Polygon',coordinates:polys[0]};
+  return{type:'MultiPolygon',coordinates:polys};
+}
+
+// Buffer com steps:16 para WKT suave (copiado do index.html)
+function turfBufferGeom(geometry,meters){
+  try{
+    const fc={type:'FeatureCollection',features:[{type:'Feature',geometry,properties:{}}]};
+    const buffered=turf.buffer(fc,meters/1000,{units:'kilometers',steps:16});
+    if(buffered?.features?.[0]?.geometry) return buffered.features[0].geometry;
+  }catch(_){}
+  return geometry;
+}
+
 function buildProxiedUrl(wfsUrl){
   const b=_proxy.replace(/\/$/,'');
   return b?`${b}?url=${encodeURIComponent(wfsUrl)}`:wfsUrl;
@@ -325,15 +367,22 @@ function App(){
     try{
       const ss=await rpc.invoke('pickRawSections',[]);
       if(!ss?.length) throw new Error('Nenhum elemento clicado');
-      const poly=ss.find(s=>['Polygon','MultiPolygon'].includes(s.geometry?.type));
-      if(!poly) throw new Error('Selecione um polígono');
-      const bfrd=turf.buffer({type:'Feature',geometry:poly.geometry},buf,{units:'meters'});
-      const[x0,y0,x1,y1]=turf.bbox(bfrd);
-      const wkt=geojsonToWKT(bfrd.geometry);
-      setGeo({geom:poly.geometry,bbox:[x0,y0,x1,y1],wkt});
+      // Suporta múltiplos polígonos — mescla igual ao GeoSampa import
+      const polys=ss.filter(s=>['Polygon','MultiPolygon'].includes(s.geometry?.type));
+      if(!polys.length) throw new Error('O elemento clicado não é um polígono');
+      const merged=mergeToSinglePolygon(polys);
+      if(!merged) throw new Error('Não foi possível mesclar as geometrias');
+      // BBOX direto da geometria original + expansão em graus (igual ao GeoSampa import)
+      const rawBbox=featureToBBOX({geometry:merged});
+      const expBbox=expandBBOX(rawBbox,buf);
+      const bbox=[expBbox.minX,expBbox.minY,expBbox.maxX,expBbox.maxY];
+      // WKT buffer suave (steps:16) para INTERSECTS
+      const buffGeom=turfBufferGeom(merged,buf);
+      const wkt=geojsonToWKT(buffGeom);
+      setGeo({geom:merged,bbox,wkt});
       setScan({});setFcs(null);setTin(null);setStats(null);
       setPhase('r_scan');
-      lg('ok',`Polígono selecionado. Buffer ${buf} m → WKT pronto.`);
+      lg('ok',`${polys.length} polígono(s) mesclado(s). Buffer ${buf} m → bbox + WKT prontos.`);
     }catch(e){lg('err',e.message);setPhase('idle');}
   };
 
@@ -455,7 +504,7 @@ function App(){
     if(!fcs||busy) return;
     if(!stats) return;
     const {datum,dnivel}=stats;
-    lg('info',`Importando curvas como layer ${mode==='temp'?'temporário 3D':'permanente'}...`);
+    lg('info',`Importando curvas — modo ${mode==='temp'?'temporário 3D':mode==='draw'?'camada de desenho':'permanente'}...`);
     try{
       if(mode==='temp'){
         // 3D: coordenadas [lng,lat,relH] + line style
@@ -469,6 +518,30 @@ function App(){
           {type:'line',paint:{'line-color':cex,'line-width':1.5,'line-opacity':0.9}}
         ]);
         lg('ok',`Curvas 3D adicionadas como layer temporário (${fc3d.features.length} feições)`);
+      } else if(mode==='draw'){
+        // Camada de desenho: createRawSections com _baseHeight por cota
+        // Mesmo padrão do GeoSampa import (modo editável) + altura 3D
+        const drawFeats=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
+          const elev=parseFloat(f.properties?.cd_numero_isovalor);
+          const relH=isNaN(elev)?0:Math.max(0,elev-datum);
+          return{
+            type:'Feature',
+            geometry:f.geometry,
+            properties:{
+              ...f.properties,
+              id:undefined,
+              _source:'GeoSampa',
+              _layer:'Curvas de Nível',
+              _baseHeight:relH,
+              baseHeight:relH,
+              height:0,
+            }
+          };
+        }));
+        lg('info',`Criando ${drawFeats.length} curvas como raw sections (baseHeight por cota)...`);
+        const r=await rpc.invoke('createRawSections',[drawFeats]);
+        const n=Array.isArray(r)?r.length:drawFeats.length;
+        lg('ok',`✓ ${n} curvas criadas no layer de desenho ativo (baseHeight por elevação)`);
       } else {
         // Permanente: importRawSections → cria raw sections editáveis no layer ativo
         // baseHeight posiciona cada curva na sua cota relativa ao datum
@@ -609,7 +682,7 @@ function App(){
       h('div',null,
         h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#252525',textTransform:'uppercase'}},'KV Arquitetos'),
         h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D'),
-        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V24')
+        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V25')
       ),
       hasGeo&&h('button',{className:'btn btn-sm',onClick:doClear,disabled:busy},'✕ limpar')
     ),
@@ -687,14 +760,14 @@ function App(){
       // Download de curvas — aparece após ter fcs
       hasFcs&&h('div',{style:{flexShrink:0}},
         h('div',{className:'divl'}),
-        h('div',{style:{display:'flex',alignItems:'center',gap:'6px',marginBottom:'4px'}},
-          h('span',{style:{fontSize:'10px',color:'#444'}},'Curvas de nível:'),
-          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'3px 9px'},
-            onClick:()=>doImport('temp'),disabled:busy},
-            '🗺 Temporário 3D'),
-          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'3px 9px'},
-            onClick:()=>doImport('perm'),disabled:busy},
-            '💾 Permanente')
+        h('div',{style:{display:'flex',alignItems:'center',gap:'4px',flexWrap:'wrap',marginBottom:'4px'}},
+          h('span',{style:{fontSize:'10px',color:'#444',marginRight:'2px'}},'Curvas:'),
+          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'3px 8px'},
+            onClick:()=>doImport('temp'),disabled:busy},'🗺 Temp 3D'),
+          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'3px 8px'},
+            onClick:()=>doImport('draw'),disabled:busy},'✏️ Desenho'),
+          h('button',{className:'btn btn-out',style:{fontSize:'10px',padding:'3px 8px'},
+            onClick:()=>doImport('perm'),disabled:busy},'💾 Permanente')
         )
       ),
 
