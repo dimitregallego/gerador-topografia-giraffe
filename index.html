@@ -289,7 +289,7 @@ function App(){
   const[fcs,setFcs]=useState(null);   // FeatureCollections das curvas fetched
   const[tin,setTin]=useState(null);
   const[stats,setStats]=useState(null);
-  const[exag,setExag]=useState(3);    // exageração vertical do preview
+  const[exag,setExag]=useState(3);    // exageração vertical do preview — mantido no state mas não exposto na UI
   const[phase,setPhase]=useState('idle');
   const[pct,setPct]=useState(0);
   const[logs,setLogs]=useState([]);
@@ -417,7 +417,7 @@ function App(){
       setTin(tinResult);
       lg('ok',`TIN: ${tinResult.features.length} triângulos | ha/hb/hc calculados por vértice`);
       // Preview com exageração
-      await _renderPreview(tinResult,eMax-eMin,exag);
+      await _renderPreview(tinResult,eMax-eMin);
       setPct(100);
       setStats({eMin,eMax,dnivel:eMax-eMin,datum,ntri:tinResult.features.length,npts:pts.length});
       lg('ok','Preview visível. Use os botões abaixo para exportar ou fixar patches.');
@@ -428,10 +428,10 @@ function App(){
     }
   };
 
-  // Preview fill-extrusion com exageração (não afeta patch values)
-  const _renderPreview=async(tinResult,dnivel,ex)=>{
-    const maxH=(dnivel||1)*ex;
-    const cex=['interpolate',['linear'],['*',['get','avgH'],ex],
+  // Preview fill-extrusion com alturas reais (sem exageração)
+  const _renderPreview=async(tinResult,dnivel)=>{
+    const maxH=dnivel||1;
+    const cex=['interpolate',['linear'],['get','avgH'],
       0,'#1a3a28',maxH*.15,'#1d6347',maxH*.35,'#25a265',
       maxH*.55,'#6ec97e',maxH*.75,'#c8e6a0',maxH,'#f0ede2'];
     try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
@@ -439,18 +439,10 @@ function App(){
       PREVIEW_ID,tinResult,
       {type:'fill-extrusion',paint:{
         'fill-extrusion-color':cex,
-        'fill-extrusion-height':['*',['get','avgH'],ex],
+        'fill-extrusion-height':['get','avgH'],
         'fill-extrusion-base':0,'fill-extrusion-opacity':0.9,
       }}
     ]);
-  };
-
-  // Ao mudar exageração, re-renderiza preview se TIN existe
-  const onExagChange=async(v)=>{
-    setExag(v);
-    if(tin&&stats&&phase==='r_patch'){
-      try{await _renderPreview(tin,stats.dnivel,v);}catch(_){}
-    }
   };
 
   // ─── Download curvas como layer ─────────────────────────────
@@ -473,12 +465,25 @@ function App(){
         ]);
         lg('ok',`Curvas 3D adicionadas como layer temporário (${fc3d.features.length} feições)`);
       } else {
-        // Permanente: GeoJSON 3D com alturas Z (mesmo padrão do temporário)
-        const fc3d=make3DContourFC(fcs,datum);
-        const allFeats=fc3d.features;
-        const merged={type:'FeatureCollection',features:allFeats};
-        await rpc.invoke('updateGeoJSONLayerContents',[CURVAS_PERM_NAME,merged]);
-        lg('ok',`Curvas 3D importadas permanentemente: "${CURVAS_PERM_NAME}" (${allFeats.length} feições)`);
+        // Permanente: raw sections com baseHeight = altura relativa ao datum
+        // Cada curva de nível é posicionada na sua cota correta no espaço 3D
+        const rawSections=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
+          const elev=parseFloat(f.properties?.cd_numero_isovalor);
+          const relH=isNaN(elev)?0:Math.max(0,elev-datum);
+          return{
+            type:'Feature',
+            geometry:f.geometry,   // LineString 2D original do GeoSampa
+            properties:{
+              baseHeight:relH,     // posiciona a linha na cota correta
+              stroke:'#00ACCD',
+              strokeWidth:1,
+              strokeOpacity:0.85,
+            }
+          };
+        }));
+        const r=await rpc.invoke('importRawSections',[rawSections]);
+        const n=Array.isArray(r)?r.length:rawSections.length;
+        lg('ok',`${n} curvas 3D criadas permanentemente (baseHeight por elevação)`);
       }
     }catch(e){
       lg('err',`Importação ${mode}: ${e.message}`);
@@ -672,14 +677,6 @@ function App(){
 
       // Barra de progresso
       isCalc&&h('div',{className:'pb',style:{flexShrink:0}},h('div',{className:'pf',style:{width:`${pct}%`}})),
-
-      // Exageração vertical do preview
-      (hasTin||phase==='r_patch')&&h('div',{style:{display:'flex',alignItems:'center',gap:'8px',margin:'5px 0',flexShrink:0}},
-        h('span',{style:{fontSize:'9px',color:'#333',width:'78px',flexShrink:0}},'Exag. vertical'),
-        h('input',{type:'range',min:1,max:20,step:1,value:exag,
-          onChange:e=>onExagChange(Number(e.target.value))}),
-        h('span',{style:{fontSize:'11px',color:'#00ACCD',fontWeight:600,minWidth:'28px',textAlign:'right'}},`${exag}×`)
-      ),
 
       // Download de curvas — aparece após ter fcs
       hasFcs&&h('div',{style:{flexShrink:0}},
