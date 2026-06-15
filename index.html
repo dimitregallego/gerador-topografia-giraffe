@@ -470,8 +470,9 @@ function App(){
         ]);
         lg('ok',`Curvas 3D adicionadas como layer temporário (${fc3d.features.length} feições)`);
       } else {
-        // Permanente: layer GeoJSON com baseHeight por cota (sem spread do GeoSampa)
-        const allFeats=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
+        // Permanente: importRawSections → cria raw sections editáveis no layer ativo
+        // baseHeight posiciona cada curva na sua cota relativa ao datum
+        const rawSections=fcs.flatMap(fc=>(fc.features||[]).map(f=>{
           const elev=parseFloat(f.properties?.cd_numero_isovalor);
           const relH=isNaN(elev)?0:Math.max(0,elev-datum);
           return{
@@ -485,9 +486,10 @@ function App(){
             }
           };
         }));
-        lg('info',`Criando layer "${CURVAS_PERM_NAME}" com ${allFeats.length} feições...`);
-        await rpc.invoke('updateGeoJSONLayerContents',[CURVAS_PERM_NAME,{type:'FeatureCollection',features:allFeats}]);
-        lg('ok',`✓ Layer "${CURVAS_PERM_NAME}" criado (${allFeats.length} curvas, baseHeight por elevação)`);
+        lg('info',`Importando ${rawSections.length} curvas como raw sections (baseHeight por cota)...`);
+        const r=await rpc.invoke('importRawSections',[rawSections]);
+        const n=Array.isArray(r)?r.length:rawSections.length;
+        lg('ok',`✓ ${n} curvas importadas no layer ativo (baseHeight por elevação)`);
       }
     }catch(e){
       lg('err',`Importação ${mode}: ${e.message}`);
@@ -607,7 +609,7 @@ function App(){
       h('div',null,
         h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#252525',textTransform:'uppercase'}},'KV Arquitetos'),
         h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D'),
-        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V23')
+        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V24')
       ),
       hasGeo&&h('button',{className:'btn btn-sm',onClick:doClear,disabled:busy},'✕ limpar')
     ),
