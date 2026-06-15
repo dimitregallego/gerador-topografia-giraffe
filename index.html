@@ -489,75 +489,73 @@ function App(){
     setPhase('patch');setPct(0);
     lg('info','━━ Criando patches 3D no projeto ━━');
     try{
-      const tinFeats=tin.features;
-
-      // Diagnóstico de alturas
-      const allH=tinFeats.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
-      const hMin=Math.min(...allH),hMax=Math.max(...allH);
-      lg('info',`Alturas: min=${hMin.toFixed(2)} m | max=${hMax.toFixed(2)} m | ${allH.filter(h=>h>0.01).length}/${allH.length} vértices acima do datum`);
-
-      // Validar geometria — filtrar triângulos degenerados (área zero ou coords inválidas)
-      const valid=tinFeats.filter(f=>{
+      // Filtra triângulos degenerados
+      const valid=tin.features.filter(f=>{
         const ring=f.geometry.coordinates[0];
         if(!ring||ring.length<4) return false;
-        const [[ax,ay],[bx,by],[cx,cy]]=ring;
-        if(![ax,ay,bx,by,cx,cy].every(Number.isFinite)) return false;
-        // Área pelo produto vetorial (deve ser >0)
-        return Math.abs((bx-ax)*(cy-ay)-(cx-ax)*(by-ay))>1e-12;
+        const[[ax,ay],[bx,by],[cx,cy]]=ring;
+        return[ax,ay,bx,by,cx,cy].every(Number.isFinite)
+          &&Math.abs((bx-ax)*(cy-ay)-(cx-ax)*(by-ay))>1e-12;
       });
-      lg('info',`${tinFeats.length} triângulos → ${valid.length} válidos após filtro de geometria`);
-      if(!valid.length) throw new Error('Nenhum triângulo válido após filtro');
-      setPct(10);
+      const allH=valid.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
+      lg('info',`${valid.length} triângulos válidos | alturas: ${Math.min(...allH).toFixed(2)}–${Math.max(...allH).toFixed(2)} m`);
 
-      // ── PASSO 1: createRawSections
-      // id:undefined é OBRIGATÓRIO — sinaliza ao SDK para gerar novo ID (padrão do index.html)
-      // Sem id:undefined, o vm() interno do Giraffe não consegue processar o feature
-      const plainSections=valid.map(f=>({
-        type:'Feature',
-        geometry:f.geometry,
+      // ── Tentativa 1: importRawSections com patch embutido (1 chamada) ─────────
+      lg('info','Tentativa 1: importRawSections com patch embutido...');
+      const patchFC={type:'FeatureCollection',features:valid.map(f=>({
+        type:'Feature',geometry:f.geometry,
         properties:{
-          id:undefined,      // ← CRÍTICO: gera novo ID (mesmo padrão do index.html editable import)
-          stackOrder:0,
-          layerId:'default',
-        }
-      }));
-      lg('info',`Passo 1: createRawSections com ${plainSections.length} polígonos (id:undefined)...`);
-      setPct(15);
-
-      const created=await rpc.invoke('createRawSections',[plainSections]);
-      lg('info',`Retorno: ${Array.isArray(created)?`array[${created.length}] tipo:${typeof created[0]}`:`${typeof created}`}`);
-
-      if(!Array.isArray(created)||!created.length){
-        throw new Error(`createRawSections retornou: ${JSON.stringify(created)?.slice(0,100)}`);
-      }
-
-      // Extrai IDs — createRawSections retorna string[] 
-      const ids=created.map(item=>typeof item==='string'?item:item?.properties?.id??item?.id??String(item));
-      if(!ids[0]) throw new Error(`Formato de ID inesperado: ${JSON.stringify(created[0])}`);
-      lg('ok',`${ids.length} seções criadas (ex. ID: ${String(ids[0]).slice(0,20)})`);
-      setPct(55);
-
-      // ── PASSO 2: updateRawSections com patch[] por vértice
-      const patchUpdates=ids.map((id,i)=>({
-        properties:{
-          id,
+          stackOrder:0,layerId:'default',
           patch:[
-            parseFloat(valid[i].properties.ha.toFixed(4)),
-            parseFloat(valid[i].properties.hb.toFixed(4)),
-            parseFloat(valid[i].properties.hc.toFixed(4)),
+            parseFloat(f.properties.ha.toFixed(4)),
+            parseFloat(f.properties.hb.toFixed(4)),
+            parseFloat(f.properties.hc.toFixed(4)),
           ],
           patchType:'slab',
         }
-      }));
-      lg('info',`Passo 2: updateRawSections patch heights... ex:[${patchUpdates[0].properties.patch.map(v=>v.toFixed(2)).join(',')}]`);
-      setPct(70);
+      }))};
+      setPct(10);
+      let usedMethod='';
+      try{
+        const r=await rpc.invoke('importRawSections',[patchFC]);
+        lg('ok',`importRawSections OK → ${JSON.stringify(r)?.slice(0,80)}`);
+        usedMethod='importRawSections';
+      }catch(e1){
+        lg('warn',`importRawSections falhou: ${e1.message.slice(0,80)}`);
 
-      await rpc.invoke('updateRawSections',[patchUpdates]);
-      setPct(95);
+        // ── Tentativa 2: createRawSection (singular) em loop + updateRawSections ─
+        lg('info',`Tentativa 2: createRawSection singular em loop (${valid.length} chamadas)...`);
+        const createdIds=[];
+        for(let i=0;i<valid.length;i++){
+          const f=valid[i];
+          const sec={type:'Feature',geometry:f.geometry,
+            properties:{id:undefined,stackOrder:0,layerId:'default'}};
+          const r=await rpc.invoke('createRawSection',[sec]);
+          const id=typeof r==='string'?r:r?.properties?.id??r?.id??null;
+          if(!id) throw new Error(`createRawSection não retornou ID (triângulo ${i}): ${JSON.stringify(r)?.slice(0,60)}`);
+          createdIds.push({id,i});
+          if(i%5===0) setPct(15+Math.round(i/valid.length*50));
+        }
+        lg('ok',`${createdIds.length} seções criadas. Aplicando patches...`);
+        setPct(68);
+        const updates=createdIds.map(({id,i})=>({
+          properties:{
+            id,
+            patch:[
+              parseFloat(valid[i].properties.ha.toFixed(4)),
+              parseFloat(valid[i].properties.hb.toFixed(4)),
+              parseFloat(valid[i].properties.hc.toFixed(4)),
+            ],
+            patchType:'slab',
+          }
+        }));
+        await rpc.invoke('updateRawSections',[updates]);
+        usedMethod='createRawSection+updateRawSections';
+      }
 
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
       setPct(100);
-      lg('ok',`✓ ${patchUpdates.length} patches 3D aplicados! (patchType:slab, por vértice)`);
+      lg('ok',`✓ ${valid.length} patches 3D criados via ${usedMethod}!`);
       setPhase('done');
     }catch(e){
       lg('err',`Erro: ${e.message}`);
