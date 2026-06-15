@@ -460,10 +460,25 @@ function App(){
       setFcs(loadedFcs);
       setPhase('tin');
       lg('info','Extraindo pontos de elevação (cd_numero_isovalor)...');
-      const pts=samplePoints(loadedFcs);
-      if(pts.length<8) throw new Error(
-        `Apenas ${pts.length} pontos com cd_numero_isovalor. `
+      const ptsAll=samplePoints(loadedFcs);
+      if(ptsAll.length<8) throw new Error(
+        `Apenas ${ptsAll.length} pontos com cd_numero_isovalor. `
         +'Verifique se o campo existe nas feições acima.');
+
+      // ── Clipar pontos ao polígono bufferizado ────────────────────
+      // As curvas de nível são linhas longas — sem clip, o TIN cobre
+      // muito além da área selecionada criando uma "forma aleatória"
+      const bufferFeature=turf.buffer(
+        {type:'Feature',geometry:geo.geom,properties:{}},
+        buf,{units:'meters'}
+      );
+      const pts=ptsAll.filter(p=>
+        turf.booleanPointInPolygon([p.lng,p.lat],bufferFeature)
+      );
+      lg('info',`Clip ao buffer ${buf}m: ${ptsAll.length} → ${pts.length} pts dentro da área`);
+      if(pts.length<8) throw new Error(
+        `Apenas ${pts.length} pontos dentro do buffer. Tente aumentar o buffer.`);
+
       const elevs=pts.map(p=>p.elev);
       const eMin=Math.min(...elevs),eMax=Math.max(...elevs);
       const datum=eMin;
@@ -687,7 +702,7 @@ function App(){
       h('div',null,
         h('p',{style:{fontSize:'9px',letterSpacing:'2px',color:'#252525',textTransform:'uppercase'}},'KV Arquitetos'),
         h('h1',{style:{fontSize:'13px',fontWeight:700,color:'#00ACCD'}},'Perfil de Terreno 3D'),
-        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V27')
+        h('p',{style:{fontSize:'9px',color:'#2a2a2a',marginTop:'1px',letterSpacing:'.5px'}},'beta V28')
       ),
       hasGeo&&h('button',{className:'btn btn-sm',onClick:doClear,disabled:busy},'✕ limpar')
     ),
