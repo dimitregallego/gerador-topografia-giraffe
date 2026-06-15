@@ -262,8 +262,10 @@ async function buildTIN(pts,datum){
     feats.push({
       type:'Feature',
       properties:{avgH:(ha+hb+hc)/3,ha,hb,hc},
+      // ALTURA CODIFICADA NA COORDENADA Z: [lng, lat, height]
+      // Z viaja com o vértice, imune a reordenações internas do Giraffe
       geometry:{type:'Polygon',
-        coordinates:[[[A.lng,A.lat],[B.lng,B.lat],[C.lng,C.lat],[A.lng,A.lat]]]}
+        coordinates:[[[A.lng,A.lat,ha],[B.lng,B.lat,hb],[C.lng,C.lat,hc],[A.lng,A.lat,ha]]]}
     });
   }
   return{type:'FeatureCollection',features:feats};
@@ -497,67 +499,66 @@ function App(){
         return[ax,ay,bx,by,cx,cy].every(Number.isFinite)
           &&Math.abs((bx-ax)*(cy-ay)-(cx-ax)*(by-ay))>1e-12;
       });
-      const allH=valid.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
-      lg('info',`${valid.length} triângulos válidos | alturas: ${Math.min(...allH).toFixed(2)}–${Math.max(...allH).toFixed(2)} m`);
 
-      // Tentativa 1: importRawSections com ARRAY de features (não FeatureCollection)
-      // Erro anterior: "e.forEach is not a function" → função espera array, não FC
-      lg('info','Tentativa 1: importRawSections com array de features...');
-      const patchFeatures=valid.map(f=>({
-        type:'Feature',geometry:f.geometry,
-        properties:{
-          stackOrder:0,layerId:'default',
-          patch:[
-            parseFloat(f.properties.ha.toFixed(4)),
-            parseFloat(f.properties.hb.toFixed(4)),
-            parseFloat(f.properties.hc.toFixed(4)),
-          ],
-          patchType:'slab',
-        }
-      }));
-      // Log do primeiro triângulo para diagnóstico
-      lg('info',`Triângulo[0] geom: ${JSON.stringify(valid[0].geometry.coordinates[0].map(p=>p.map(v=>v.toFixed(6))))}`);
+      const allH=valid.flatMap(f=>f.geometry.coordinates[0].slice(0,3).map(v=>v[2]||0));
+      lg('info',`${valid.length} triângulos | alturas Z: ${Math.min(...allH).toFixed(2)}–${Math.max(...allH).toFixed(2)} m`);
+      setPct(5);
+
+      // Estratégia: geometria 3D [lng,lat,Z] + patch derivado dos Z reais do anel
+      // Z está embutido no vértice → imune a reordenação do anel pelo Giraffe
+      // patch[] é derivado da ORDEM REAL do anel (não da ordem da construção)
+      // assim mesmo se o Giraffe reordenar, os Z já estão corretos nas coords
+      const patchFeatures=valid.map(f=>{
+        const ring=f.geometry.coordinates[0]; // já tem Z: [lng,lat,h]
+        // patch derivado da ordem ATUAL do anel (0,1,2 = primeiros 3 vértices únicos)
+        const p=ring.slice(0,3).map(v=>parseFloat((v[2]||0).toFixed(4)));
+        return{
+          type:'Feature',
+          geometry:f.geometry,   // 3D: [lng,lat,height] por vértice
+          properties:{
+            stackOrder:0,
+            layerId:'default',
+            patch:p,             // redundante mas reforça a intenção
+            patchType:'slab',
+          }
+        };
+      });
+      lg('info',`Ex. feat[0]: Z=[${valid[0].geometry.coordinates[0].slice(0,3).map(v=>v[2]?.toFixed(2)).join(',')}] patch=[${patchFeatures[0].properties.patch.join(',')}]`);
       setPct(10);
+
+      // Tentativa: importRawSections com array de features (3D geom + patch)
+      lg('info','importRawSections com geometria 3D + patch por vértice...');
       let usedMethod='';
       try{
         const r=await rpc.invoke('importRawSections',[patchFeatures]);
         lg('ok',`importRawSections OK → ${JSON.stringify(r)?.slice(0,80)}`);
-        usedMethod='importRawSections';
+        usedMethod='importRawSections(3D+patch)';
       }catch(e1){
-        // ── Tentativa 2: createRawSection singular em loop + updateRawSections ─
         lg('warn',`importRawSections falhou: ${e1.message.slice(0,80)}`);
-        lg('info',`Tentativa 2: createRawSection singular (${valid.length} chamadas, props mínimas)...`);
+        // Fallback: createRawSection singular em loop
+        lg('info',`Fallback: createRawSection singular (${valid.length} chamadas)...`);
         const createdIds=[];
         for(let i=0;i<valid.length;i++){
-          const f=valid[i];
-          // Props absolutamente mínimas para isolar se é geom ou props que falha
-          const sec={type:'Feature',geometry:f.geometry,properties:{}};
-          const r=await rpc.invoke('createRawSection',[sec]);
+          const f=patchFeatures[i];
+          const r=await rpc.invoke('createRawSection',[f]);
           const id=typeof r==='string'?r:r?.properties?.id??r?.id??null;
-          if(!id) throw new Error(`createRawSection não retornou ID (triângulo ${i}): ${JSON.stringify(r)?.slice(0,60)}`);
-          createdIds.push({id,i});
-          if(i%5===0) setPct(15+Math.round(i/valid.length*50));
+          if(!id) throw new Error(`createRawSection sem ID (tri ${i}): ${JSON.stringify(r)?.slice(0,60)}`);
+          createdIds.push({id,patchFeat:f});
+          if(i%5===0) setPct(15+Math.round(i/valid.length*60));
         }
-        lg('ok',`${createdIds.length} seções criadas. Aplicando patches...`);
-        setPct(68);
-        const updates=createdIds.map(({id,i})=>({
-          properties:{
-            id,
-            patch:[
-              parseFloat(valid[i].properties.ha.toFixed(4)),
-              parseFloat(valid[i].properties.hb.toFixed(4)),
-              parseFloat(valid[i].properties.hc.toFixed(4)),
-            ],
-            patchType:'slab',
-          }
-        }));
-        await rpc.invoke('updateRawSections',[updates]);
-        usedMethod='createRawSection+updateRawSections';
+        lg('ok',`${createdIds.length} seções criadas. Aplicando updateRawSections...`);
+        setPct(78);
+        await rpc.invoke('updateRawSections',[
+          createdIds.map(({id,patchFeat})=>({
+            properties:{id,...patchFeat.properties}
+          }))
+        ]);
+        usedMethod='createRawSection+updateRawSections(3D+patch)';
       }
 
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
       setPct(100);
-      lg('ok',`✓ ${valid.length} patches 3D criados via ${usedMethod}!`);
+      lg('ok',`✓ ${valid.length} patches 3D via ${usedMethod}`);
       setPhase('done');
     }catch(e){
       lg('err',`Erro: ${e.message}`);
