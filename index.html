@@ -500,9 +500,10 @@ function App(){
       const allH=valid.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
       lg('info',`${valid.length} triângulos válidos | alturas: ${Math.min(...allH).toFixed(2)}–${Math.max(...allH).toFixed(2)} m`);
 
-      // ── Tentativa 1: importRawSections com patch embutido (1 chamada) ─────────
-      lg('info','Tentativa 1: importRawSections com patch embutido...');
-      const patchFC={type:'FeatureCollection',features:valid.map(f=>({
+      // Tentativa 1: importRawSections com ARRAY de features (não FeatureCollection)
+      // Erro anterior: "e.forEach is not a function" → função espera array, não FC
+      lg('info','Tentativa 1: importRawSections com array de features...');
+      const patchFeatures=valid.map(f=>({
         type:'Feature',geometry:f.geometry,
         properties:{
           stackOrder:0,layerId:'default',
@@ -513,23 +514,24 @@ function App(){
           ],
           patchType:'slab',
         }
-      }))};
+      }));
+      // Log do primeiro triângulo para diagnóstico
+      lg('info',`Triângulo[0] geom: ${JSON.stringify(valid[0].geometry.coordinates[0].map(p=>p.map(v=>v.toFixed(6))))}`);
       setPct(10);
       let usedMethod='';
       try{
-        const r=await rpc.invoke('importRawSections',[patchFC]);
+        const r=await rpc.invoke('importRawSections',[patchFeatures]);
         lg('ok',`importRawSections OK → ${JSON.stringify(r)?.slice(0,80)}`);
         usedMethod='importRawSections';
       }catch(e1){
+        // ── Tentativa 2: createRawSection singular em loop + updateRawSections ─
         lg('warn',`importRawSections falhou: ${e1.message.slice(0,80)}`);
-
-        // ── Tentativa 2: createRawSection (singular) em loop + updateRawSections ─
-        lg('info',`Tentativa 2: createRawSection singular em loop (${valid.length} chamadas)...`);
+        lg('info',`Tentativa 2: createRawSection singular (${valid.length} chamadas, props mínimas)...`);
         const createdIds=[];
         for(let i=0;i<valid.length;i++){
           const f=valid[i];
-          const sec={type:'Feature',geometry:f.geometry,
-            properties:{id:undefined,stackOrder:0,layerId:'default'}};
+          // Props absolutamente mínimas para isolar se é geom ou props que falha
+          const sec={type:'Feature',geometry:f.geometry,properties:{}};
           const r=await rpc.invoke('createRawSection',[sec]);
           const id=typeof r==='string'?r:r?.properties?.id??r?.id??null;
           if(!id) throw new Error(`createRawSection não retornou ID (triângulo ${i}): ${JSON.stringify(r)?.slice(0,60)}`);
