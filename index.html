@@ -483,67 +483,73 @@ function App(){
     }
   };
 
-  // ─── Fixar como patches editáveis (fluxo 2 passos conforme docs Giraffe) ──
-  // Passo 1: createRawSections (polígonos simples) → captura IDs retornados
-  // Passo 2: updateRawSections com patch[] por vértice + patchType:'slab'
+  // ─── Fixar como patches editáveis ──────────────────────────────────────────
   const doFixar=async()=>{
     if(!tin||phase!=='r_patch'||busy) return;
     setPhase('patch');setPct(0);
-    lg('info','━━ Criando patches 3D no projeto (2 passos) ━━');
+    lg('info','━━ Criando patches 3D no projeto ━━');
     try{
       const tinFeats=tin.features;
 
-      // Diagnóstico de alturas antes de qualquer chamada
+      // Diagnóstico de alturas
       const allH=tinFeats.flatMap(f=>[f.properties.ha,f.properties.hb,f.properties.hc]);
       const hMin=Math.min(...allH),hMax=Math.max(...allH);
-      const nonZero=allH.filter(h=>h>0.01).length;
-      lg('info',`Alturas: min=${hMin.toFixed(2)} m | max=${hMax.toFixed(2)} m | ${nonZero}/${allH.length} vértices acima do datum`);
-      if(hMax<0.05) lg('warn','⚠ desnível <5 cm — área plana ou cd_numero_isovalor constante');
+      lg('info',`Alturas: min=${hMin.toFixed(2)} m | max=${hMax.toFixed(2)} m | ${allH.filter(h=>h>0.01).length}/${allH.length} vértices acima do datum`);
 
-      // ── Passo 1: criar polígonos planos (SEM patch para evitar erro no create) ─
-      const plainSections=tinFeats.map(f=>({
+      // Validar geometria — filtrar triângulos degenerados (área zero ou coords inválidas)
+      const valid=tinFeats.filter(f=>{
+        const ring=f.geometry.coordinates[0];
+        if(!ring||ring.length<4) return false;
+        const [[ax,ay],[bx,by],[cx,cy]]=ring;
+        if(![ax,ay,bx,by,cx,cy].every(Number.isFinite)) return false;
+        // Área pelo produto vetorial (deve ser >0)
+        return Math.abs((bx-ax)*(cy-ay)-(cx-ax)*(by-ay))>1e-12;
+      });
+      lg('info',`${tinFeats.length} triângulos → ${valid.length} válidos após filtro de geometria`);
+      if(!valid.length) throw new Error('Nenhum triângulo válido após filtro');
+      setPct(10);
+
+      // ── PASSO 1: createRawSections
+      // id:undefined é OBRIGATÓRIO — sinaliza ao SDK para gerar novo ID (padrão do index.html)
+      // Sem id:undefined, o vm() interno do Giraffe não consegue processar o feature
+      const plainSections=valid.map(f=>({
         type:'Feature',
-        geometry:f.geometry,  // 2D [lng,lat] — patch define as alturas, não as coords
+        geometry:f.geometry,
         properties:{
+          id:undefined,      // ← CRÍTICO: gera novo ID (mesmo padrão do index.html editable import)
           stackOrder:0,
-          color:'#4ade80',
-          fillOpacity:0.8,
           layerId:'default',
         }
       }));
-      lg('info',`Passo 1: criando ${plainSections.length} polígonos planos...`);
+      lg('info',`Passo 1: createRawSections com ${plainSections.length} polígonos (id:undefined)...`);
       setPct(15);
 
       const created=await rpc.invoke('createRawSections',[plainSections]);
-      lg('info',`createRawSections retornou: ${Array.isArray(created)?`array[${created.length}], tipo: ${typeof created[0]}`:`${typeof created}`}`);
+      lg('info',`Retorno: ${Array.isArray(created)?`array[${created.length}] tipo:${typeof created[0]}`:`${typeof created}`}`);
 
-      // createRawSections retorna string[] (array de IDs), não RawSection[]
       if(!Array.isArray(created)||!created.length){
-        throw new Error(`createRawSections retornou vazio ou inválido: ${JSON.stringify(created)?.slice(0,80)}`);
+        throw new Error(`createRawSections retornou: ${JSON.stringify(created)?.slice(0,100)}`);
       }
 
-      // Normaliza para array de strings (suporta tanto string[] quanto object[])
-      const ids=created.map(item=>typeof item==='string'?item:item?.properties?.id??item?.id);
-      if(!ids[0]) throw new Error(`ID não encontrado no retorno: ${JSON.stringify(created[0])?.slice(0,80)}`);
-      lg('ok',`${ids.length} seções criadas. IDs capturados (ex: ${ids[0]}).`);
+      // Extrai IDs — createRawSections retorna string[] 
+      const ids=created.map(item=>typeof item==='string'?item:item?.properties?.id??item?.id??String(item));
+      if(!ids[0]) throw new Error(`Formato de ID inesperado: ${JSON.stringify(created[0])}`);
+      lg('ok',`${ids.length} seções criadas (ex. ID: ${String(ids[0]).slice(0,20)})`);
       setPct(55);
 
-      // ── Passo 2: updateRawSections aplicando patch[] por vértice ─────────────
-      // patch[i] = altura em metros do vértice i (sem o ponto de fechamento)
-      // patchType:'slab' = superfície inclinada interpolada por vértice
+      // ── PASSO 2: updateRawSections com patch[] por vértice
       const patchUpdates=ids.map((id,i)=>({
         properties:{
           id,
           patch:[
-            parseFloat(tinFeats[i].properties.ha.toFixed(4)),
-            parseFloat(tinFeats[i].properties.hb.toFixed(4)),
-            parseFloat(tinFeats[i].properties.hc.toFixed(4)),
+            parseFloat(valid[i].properties.ha.toFixed(4)),
+            parseFloat(valid[i].properties.hb.toFixed(4)),
+            parseFloat(valid[i].properties.hc.toFixed(4)),
           ],
           patchType:'slab',
         }
       }));
-      lg('info',`Passo 2: aplicando patch heights em ${patchUpdates.length} seções...`);
-      lg('info',`  Exemplo patch[0]: [${patchUpdates[0].properties.patch.map(v=>v.toFixed(2)).join(', ')}]`);
+      lg('info',`Passo 2: updateRawSections patch heights... ex:[${patchUpdates[0].properties.patch.map(v=>v.toFixed(2)).join(',')}]`);
       setPct(70);
 
       await rpc.invoke('updateRawSections',[patchUpdates]);
@@ -551,7 +557,7 @@ function App(){
 
       try{await rpc.invoke('removeTempLayer',[PREVIEW_ID]);}catch(_){}
       setPct(100);
-      lg('ok',`✓ ${patchUpdates.length} patches 3D com altura por vértice aplicados!`);
+      lg('ok',`✓ ${patchUpdates.length} patches 3D aplicados! (patchType:slab, por vértice)`);
       setPhase('done');
     }catch(e){
       lg('err',`Erro: ${e.message}`);
